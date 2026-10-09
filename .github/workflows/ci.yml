@@ -33,8 +33,17 @@ jobs:
         env:
           MCE_E2E_DATA: ${{ github.workspace }}/e2e-data
 
+      # On failure, the last lines of output are published as an annotation,
+      # readable from the run summary and the API without downloading logs.
       - name: Build Windows installer
-        run: npm run dist:win
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! npm run dist:win 2>&1 | tee dist.log; then
+            msg=$(tail -n 60 dist.log | sed -e 's/\r//g' -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=electron-builder failed::$msg"
+            exit 1
+          fi
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
