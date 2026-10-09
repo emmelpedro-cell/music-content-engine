@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,7 +8,11 @@ import { join } from 'node:path'
  * saved in one session is still there after a restart.
  * Requires a build first (`npm run test:e2e` does both).
  */
-const dataDir = mkdtempSync(join(tmpdir(), 'mce-e2e-'))
+// CI sets MCE_E2E_DATA so the app's logs survive the run and can be uploaded on failure.
+const keepData = Boolean(process.env.MCE_E2E_DATA)
+const dataDir = keepData
+  ? (mkdirSync(process.env.MCE_E2E_DATA!, { recursive: true }), process.env.MCE_E2E_DATA!)
+  : mkdtempSync(join(tmpdir(), 'mce-e2e-'))
 
 async function launch(): Promise<ElectronApplication> {
   return electron.launch({
@@ -17,7 +21,9 @@ async function launch(): Promise<ElectronApplication> {
   })
 }
 
-test.afterAll(() => rmSync(dataDir, { recursive: true, force: true }))
+test.afterAll(() => {
+  if (!keepData) rmSync(dataDir, { recursive: true, force: true })
+})
 
 test('creates a project and finds it again after a restart', async () => {
   const title = `Smoke test ${Date.now()}`

@@ -7,3 +7,4 @@ playwright-report/
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
+e2e-data/

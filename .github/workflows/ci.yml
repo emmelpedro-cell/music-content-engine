@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows — install, test, launch app
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No lockfile yet: the first green run tells us the versions resolve together.
+      # After that, commit package-lock.json and switch this to `npm ci`.
+      - name: Install dependencies (also rebuilds better-sqlite3 for Electron)
+        run: npm install
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: E2E — build and launch the real Electron app
+        run: npm run test:e2e
+        env:
+          MCE_E2E_DATA: ${{ github.workspace }}/e2e-data
+
+      - name: Build Windows installer
+        run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/*.exe
+          if-no-files-found: warn
+
+      - name: Upload test results and logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-diagnostics
+          path: |
+            test-results/
+            e2e-data/app-data/logs/
+          if-no-files-found: ignore
