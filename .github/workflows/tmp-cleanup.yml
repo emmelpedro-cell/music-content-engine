@@ -1,0 +1,14 @@
+# Temporary: deletes the draft release made by tmp-model. Removed right after.
+name: tmp-cleanup
+on:
+  push:
+    paths: ['.github/workflows/tmp-cleanup.yml']
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE repos/${{ github.repository }}/releases/408978148
