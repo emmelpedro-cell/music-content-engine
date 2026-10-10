@@ -7,7 +7,7 @@ import {
   waveformPeaks
 } from '../../src/main/analysis/analyze'
 import { MagnitudeFft } from '../../src/main/analysis/fft'
-import { beatRecall, synthTrack } from '../helpers/synth'
+import { beatRecall, synthTrack, synthTrap } from '../helpers/synth'
 
 const SR = 22050
 
@@ -69,6 +69,17 @@ describe('beat analysis on music with known tempo', () => {
     expect(b.bpm).toBeGreaterThan(95)
     expect(b.bpm).toBeLessThan(105)
     expect(beatRecall(ramp.beats, b.beats)).toBeGreaterThanOrEqual(0.9)
+  })
+
+  it('reads trap with triplet hi-hats at its real tempo, on a steady grid', () => {
+    // A real 150 BPM Nepali trap song was first read as 100 BPM with wandering beats.
+    const trap = synthTrap({ bpm: 150, seconds: 40, offset: 0.3 })
+    const a = analyzeSamples(trap)
+    const bpm = a.bpm!
+    // 150, or its half-time reading 75 (one click away with "Double time"); never 100.
+    expect(Math.min(Math.abs(bpm - 150), Math.abs(bpm * 2 - 150))).toBeLessThan(0.5)
+    if (Math.abs(bpm - 150) < 0.5) expect(beatRecall(trap.beats, a.beats, 0.02)).toBeGreaterThanOrEqual(0.95)
+    expect(a.tempoStability).toBeGreaterThanOrEqual(0.95)
   })
 
   it('offers half and double time as alternatives', () => {

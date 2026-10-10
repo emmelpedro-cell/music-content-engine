@@ -95,3 +95,44 @@ export function wavBytes(samples: Float32Array, sampleRate: number): Buffer {
   header.writeUInt32LE(data.length, 40)
   return Buffer.concat([header, data])
 }
+
+/**
+ * Trap-style loop with known beats: kick on 1 and the "and" of 2, snare on 3 (half-time
+ * feel), hi-hats in triplets with 32nd-note rolls. Hi-hat triplets make a 3:2 relative of
+ * the tempo (150 → 100) look periodic too.
+ */
+export function synthTrap(o: { bpm: number; seconds: number; offset?: number; seed?: number }): SynthTrack {
+  const sr = 22050
+  const n = Math.floor(o.seconds * sr)
+  const samples = new Float32Array(n)
+  let seed = o.seed ?? 3
+  const rand = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296)
+  const add = (start: number, fn: (dt: number) => number, length: number) => {
+    const s0 = Math.floor(start * sr)
+    for (let i = 0; i < Math.floor(length * sr) && s0 + i < n; i++) if (s0 + i >= 0) samples[s0 + i]! += fn(i / sr)
+  }
+  const beat = 60 / o.bpm
+  const beats: number[] = []
+  const downbeats: number[] = []
+  const kick = (t: number) => add(t, (dt) => 0.9 * Math.sin(2 * Math.PI * (45 + 80 * Math.exp(-dt * 25)) * dt) * Math.exp(-dt * 6), 0.6)
+  const snare = (t: number) => add(t, (dt) => 0.5 * (rand() * 2 - 1) * Math.exp(-dt * 20) + 0.3 * Math.sin(2 * Math.PI * 190 * dt) * Math.exp(-dt * 25), 0.25)
+  const hat = (t: number, a: number) => add(t, (dt) => a * (rand() * 2 - 1) * Math.exp(-dt * 120), 0.03)
+  let bar = 0
+  for (let t = o.offset ?? 0.5; t < o.seconds - 4 * beat; t += 4 * beat, bar++) {
+    downbeats.push(t)
+    for (let b = 0; b < 4; b++) beats.push(t + b * beat)
+    kick(t)
+    kick(t + 1.5 * beat)
+    snare(t + 2 * beat)
+    for (let b = 0; b < 4; b++) {
+      // Triplet hats, with a 32nd-note roll on the last beat of every second bar.
+      if (b === 3 && bar % 2 === 1) for (let r = 0; r < 8; r++) hat(t + b * beat + (r * beat) / 8, 0.12)
+      else for (let r = 0; r < 3; r++) hat(t + b * beat + (r * beat) / 3, r === 0 ? 0.2 : 0.12)
+    }
+  }
+  for (let i = 0; i < n; i++) samples[i]! += 0.04 * Math.sin((2 * Math.PI * 110 * i) / sr) + 0.005 * (rand() * 2 - 1)
+  let peak = 0
+  for (const v of samples) peak = Math.max(peak, Math.abs(v))
+  for (let i = 0; i < n; i++) samples[i]! /= peak * 1.1
+  return { samples, sampleRate: sr, beats, downbeats }
+}

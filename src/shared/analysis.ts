@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 /** Bump when the algorithm changes in a way that should invalidate cached analyses. */
-export const ANALYSIS_VERSION = 1
+export const ANALYSIS_VERSION = 2
 
 export type TempoCandidate = { bpm: number; score: number }
 

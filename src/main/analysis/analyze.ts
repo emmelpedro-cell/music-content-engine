@@ -161,6 +161,11 @@ export function estimateTempo(onset: Float64Array, fps: number): TempoEstimate |
   // Very fast tempos are usually eighth notes; prefer half time when it scores almost as well.
   // (174 BPM drum & bass stays as it is.)
   if (bpm > 180 && s((60 * fps) / (bpm / 2)) >= 0.7 * best) bpm /= 2
+  // Triplet-feel music (trap hi-hats, swing) can make a 3:2 relative of the beat look
+  // periodic too: 150 BPM trap is easily read as 100. Autocorrelation can't tell them
+  // apart, so ask which grid the attacks actually land on.
+  bpm = resolveTripletAmbiguity(onset, fps, bpm)
+  if (bpm > 180) bpm /= 2
 
   const sorted = scores.map((x) => x.score).sort((a, b) => a - b)
   const median = sorted[Math.floor(sorted.length / 2)]!
@@ -174,6 +179,108 @@ export function estimateTempo(onset: Float64Array, fps: number): TempoEstimate |
 
   return { bpm, confidence, candidates }
 }
+
+/**
+ * Mean onset strength on a beat grid of the given tempo, at its best phase
+ * (searched in half-frame steps), with the tempo itself fine-tuned within ±1.5 %.
+ */
+export function gridFit(onset: Float64Array, fps: number, bpm: number): { bpm: number; fit: number; phase: number } {
+  let best = { bpm, fit: 0, phase: 0 }
+  for (let k = -15; k <= 15; k++) {
+    const b = bpm * (1 + k / 1000)
+    const period = (60 * fps) / b
+    for (let phase = 0; phase < period; phase += 0.5) {
+      let sum = 0
+      let count = 0
+      for (let t = phase; t < onset.length - 1; t += period) {
+        const i = Math.floor(t)
+        const frac = t - i
+        sum += onset[i]! * (1 - frac) + onset[i + 1]! * frac
+        count++
+      }
+      const fit = count ? sum / count : 0
+      if (fit > best.fit) best = { bpm: b, fit, phase }
+    }
+  }
+  return best
+}
+
+/**
+ * Compares the detected tempo with its 3:2 relatives. A slower grid always fits at least
+ * as well as a faster one (it only has to hit the strongest attacks), so a relative only
+ * wins when a *faster* one fits better: 1.5× (e.g. 100 → 150) or 4/3× (e.g. 100 → 133,
+ * whose half-time 66.7 is the 2:3 reading).
+ */
+export function resolveTripletAmbiguity(onset: Float64Array, fps: number, bpm: number): number {
+  const here = gridFit(onset, fps, bpm)
+  let choice = { bpm, fit: here.fit * TRIPLET_MARGIN, phase: 0 }
+  for (const factor of [1.5, 4 / 3]) {
+    const alt = gridFit(onset, fps, bpm * factor)
+    if (alt.fit > choice.fit) choice = alt
+  }
+  return choice.bpm
+}
+
+/**
+ * Music made in a DAW sits on a fixed grid, but the tracker can wander towards hi-hat rolls
+ * and off-beat accents (trap, drill), landing tens of milliseconds off the beat. When the
+ * tracked beats stay close to one constant-tempo grid overall, yet stray from it noticeably,
+ * and the grid explains the attacks about as well, use the grid. Live playing (beats close
+ * to the grid with small human deviations) and tempo changes (beats far from any single
+ * grid) keep the tracked beats.
+ */
+export function snapToSteadyGrid(onset: Float64Array, fps: number, frames: number[], bpm: number): number[] | null {
+  if (frames.length < 16) return null
+  const grid = gridFit(onset, fps, bpm)
+  const period = (60 * fps) / grid.bpm
+  const ms = (f: number) => (f / fps) * 1000
+  const deviation = frames
+    .map((f) => Math.abs(f - (grid.phase + Math.round((f - grid.phase) / period) * period)))
+    .map(ms)
+    .sort((a, b) => a - b)
+  const median = deviation[Math.floor(deviation.length / 2)]!
+  const p90 = deviation[Math.floor(deviation.length * 0.9)]!
+  if (median > STEADY_MAX_MEDIAN_MS || p90 <= STEADY_WANDER_MS) return null
+
+  // Attack strength near each beat (±2 frames, so frame rounding doesn't decide).
+  const near = (t: number) => {
+    let best = 0
+    for (let d = -2; d <= 2; d++) {
+      const i = Math.round(t) + d
+      if (i >= 0 && i < onset.length) best = Math.max(best, onset[i]!)
+    }
+    return best
+  }
+  // Refine the grid by least squares on the tracked beats that agree with it (the coarse
+  // search is off by a few hundredths of a BPM, which adds up over a whole song).
+  const inliers = frames
+    .map((f) => ({ k: Math.round((f - grid.phase) / period), f }))
+    .filter(({ k, f }) => ms(Math.abs(f - (grid.phase + k * period))) <= STEADY_MAX_MEDIAN_MS)
+  if (inliers.length < 8) return null
+  const n = inliers.length
+  const mk = inliers.reduce((a, x) => a + x.k, 0) / n
+  const mf = inliers.reduce((a, x) => a + x.f, 0) / n
+  const sxx = inliers.reduce((a, x) => a + (x.k - mk) ** 2, 0)
+  const slope = inliers.reduce((a, x) => a + (x.k - mk) * (x.f - mf), 0) / sxx
+  const intercept = mf - slope * mk
+  const first = frames[0]!
+  const last = frames[frames.length - 1]!
+  const regular: number[] = []
+  const k0 = Math.ceil((first - slope / 2 - intercept) / slope)
+  for (let k = k0; intercept + k * slope <= last + slope / 2 && intercept + k * slope < onset.length; k++) regular.push(intercept + k * slope)
+  const mean = (xs: number[]) => xs.reduce((a, t) => a + near(t), 0) / (xs.length || 1)
+  return mean(regular) >= STEADY_GRID_RATIO * mean(frames) ? regular : null
+}
+
+/** Tracked beats must sit this close (median) to a single constant-tempo grid… */
+const STEADY_MAX_MEDIAN_MS = 30
+/** …while straying from it this much (90th percentile) for the grid to take over. */
+const STEADY_WANDER_MS = 30
+/** And the grid must explain the attacks at least this well relative to the tracked beats. */
+const STEADY_GRID_RATIO = 0.75
+
+/** How much better a 3:2 relative must fit before it replaces the detected tempo. */
+const TRIPLET_MARGIN = 1.1
 
 /* ------------------------------------------------------------------ */
 /* Beat tracking (dynamic programming, Ellis 2007)                    */
@@ -385,6 +492,12 @@ export function analyzeSamples(input: AnalysisInput, options: { beatsPerBar?: nu
 
   const tracked = trackBeats(features.onset, features.fps, tempo.bpm)
   if (tracked.frames.length < 4) return empty('No clear beat was found. Set the tempo manually.')
+  const steady = snapToSteadyGrid(features.onset, features.fps, tracked.frames, tempo.bpm)
+  if (steady) {
+    const top = Math.max(1e-9, ...steady.map((f) => features.onset[Math.round(f)] ?? 0))
+    tracked.frames = steady
+    tracked.strengths = steady.map((f) => round2((features.onset[Math.round(f)] ?? 0) / top))
+  }
 
   // Without real rhythmic attacks (ambient pads, noise) the tracker would still produce a
   // regular grid. Report "no clear beat" instead of inventing markers.
