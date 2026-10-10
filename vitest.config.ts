@@ -9,6 +9,8 @@ export default defineConfig({
     pool: 'forks',
     // Media tests run real FFmpeg processes.
     testTimeout: 60_000,
-    hookTimeout: 120_000
+    hookTimeout: 120_000,
+    // In CI: annotations for failures and a summary of what ran.
+    reporters: process.env.GITHUB_ACTIONS ? ['default', 'github-actions', './tests/summary-reporter-vitest.ts'] : ['default']
   }
 })

@@ -26,6 +26,7 @@
     "electron.vite.config.ts",
     "vitest.config.ts",
     "tests/unit/**/*",
-    "tests/helpers/**/*"
+    "tests/helpers/**/*",
+    "tests/summary-reporter-vitest.ts"
   ]
 }

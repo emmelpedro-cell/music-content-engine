@@ -12,6 +12,8 @@ import { card, launchApp, makeDataDir, openLibrary, stubOpenDialog } from '../e2
 const exe = resolve(process.env.MCE_PACKAGED_EXE ?? join('dist', 'win-unpacked', 'Music Content Engine.exe'))
 const ffmpegDir = join(dirname(exe), 'resources', 'ffmpeg')
 
+// Locally a missing build just skips; in CI it must fail, so a green run proves the packaged app was tested.
+if (process.env.CI && !existsSync(exe)) throw new Error(`Packaged app not found at ${exe}.`)
 test.skip(!existsSync(exe), `Packaged app not found at ${exe}. Run "npm run dist:win" first.`)
 
 const dataDir = makeDataDir('packaged')

@@ -4,8 +4,8 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 15_000 },
   workers: 1,
-  // In CI, failures also become annotations on the workflow run.
-  reporter: process.env.CI ? [['github'], ['list']] : 'list',
+  // In CI, failures become annotations on the workflow run, plus a summary of every test's outcome.
+  reporter: process.env.CI ? [['github'], ['list'], ['./tests/summary-reporter-playwright.ts']] : 'list',
   projects: [
     // The built app run from the project folder (`npm run test:e2e`).
     { name: 'dev', testDir: './tests/e2e' },
