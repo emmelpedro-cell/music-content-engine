@@ -16,7 +16,7 @@ jobs:
           for n in $(cat lgpl.txt); do
             curl -sSL -o "$n" "https://github.com/BtbN/FFmpeg-Builds/releases/download/$TAG/$n"
             out="$out$(sha256sum "$n" | cut -d' ' -f1) $(stat -c %s "$n") $n%0A"
-            mkdir -p x && (cd x && (unzip -q "../$n" 2>/dev/null || tar -xJf "../$n")) && out="$out$(cd x && find . -type f | sed "s|^./||" | sort | tr "\n" " ")%0A" && rm -rf x "$n"
+            mkdir -p x && (cd x && (unzip -q "../$n" 2>/dev/null || tar -xJf "../$n")) && out="$out$(cd x && find . -type f \( -path "*/bin/*" -o -path "*/lib/*.so*" \) | sed "s|^./[^/]*/||" | sort | tr "\n" " ")%0A" && rm -rf x "$n"
           done
           echo "::notice title=lgpl-assets::$out"
           echo "::notice title=all-names::$(tr '\n' ' ' < names.txt | head -c 3500)"
