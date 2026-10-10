@@ -7,9 +7,14 @@ on:
 
 jobs:
   windows:
-    name: Windows — install, test, launch app
+    name: Windows — install, test, launch app, package
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      MCE_E2E_DATA: ${{ github.workspace }}/e2e-data
     steps:
       - uses: actions/checkout@v4
 
@@ -17,35 +22,37 @@ jobs:
         with:
           node-version: 22
 
+      # The pinned FFmpeg archive (scripts/ffmpeg-sources.json); its SHA-256 is verified after restore.
+      - name: Cache FFmpeg download
+        uses: actions/cache@v4
+        with:
+          path: vendor/ffmpeg/.cache
+          key: ffmpeg-${{ hashFiles('scripts/ffmpeg-sources.json') }}
+
       # No lockfile yet: the first green run tells us the versions resolve together.
       # After that, commit package-lock.json and switch this to `npm ci`.
-      - name: Install dependencies (also rebuilds better-sqlite3 for Electron)
-        run: npm install
+      - name: Install dependencies (rebuilds better-sqlite3 for Electron, installs FFmpeg)
+        run: scripts/ci-step.sh "npm install" npm install
+
+      - name: Verify bundled FFmpeg (strict)
+        run: scripts/ci-step.sh "FFmpeg" npm run fetch:ffmpeg
 
       - name: Type check
-        run: npm run typecheck
+        run: scripts/ci-step.sh "Type check" npm run typecheck
 
-      - name: Unit tests
+      - name: Unit tests (real FFmpeg)
         run: npm test
 
-      - name: E2E — build and launch the real Electron app
+      - name: E2E — build and drive the real Electron app
         run: npm run test:e2e
-        env:
-          MCE_E2E_DATA: ${{ github.workspace }}/e2e-data
 
-      # On failure, the last lines of output are published as an annotation,
-      # readable from the run summary and the API without downloading logs.
       - name: Build Windows installer
-        shell: bash
-        run: |
-          set -o pipefail
-          if ! npm run dist:win 2>&1 | tee dist.log; then
-            msg=$(tail -n 60 dist.log | sed -e 's/\r//g' -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
-            echo "::error title=electron-builder failed::$msg"
-            exit 1
-          fi
+        run: scripts/ci-step.sh "electron-builder" npm run dist:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Packaged app — bundled FFmpeg found and working
+        run: npm run test:packaged
 
       - name: Upload installer
         if: success()
@@ -53,14 +60,14 @@ jobs:
         with:
           name: windows-installer
           path: dist/*.exe
-          if-no-files-found: warn
+          if-no-files-found: error
 
-      - name: Upload test results and logs
+      - name: Upload test results and app logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: failure-diagnostics
           path: |
             test-results/
-            e2e-data/app-data/logs/
+            e2e-data/**/app-data/logs/
           if-no-files-found: ignore

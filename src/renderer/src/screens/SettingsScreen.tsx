@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { MediaToolsStatus } from '../../../shared/media'
 import type { AppInfo, Settings } from '../../../shared/schemas'
 import { HEX_COLOR } from '../../../shared/schemas'
 import { api, unwrap } from '../api'
@@ -7,6 +8,8 @@ import type { NoticeState } from '../components/Notice'
 type Props = {
   settings: Settings
   info: AppInfo
+  tools: MediaToolsStatus | null
+  onRecheckTools: () => Promise<MediaToolsStatus>
   onSettingsChanged: (s: Settings) => void
   onInfoChanged: () => Promise<void>
   onNotice: (n: NoticeState) => void
@@ -15,8 +18,30 @@ type Props = {
 
 const SWATCHES = ['#e8a33d', '#e2604a', '#4fb38a', '#4c9be8', '#a77be0', '#d9d9d9']
 
-export function SettingsScreen({ settings, info, onSettingsChanged, onInfoChanged, onNotice, onError }: Props) {
+export function SettingsScreen({
+  settings,
+  info,
+  tools,
+  onRecheckTools,
+  onSettingsChanged,
+  onInfoChanged,
+  onNotice,
+  onError
+}: Props) {
   const [accent, setAccent] = useState(settings.accentColor)
+  const [checkingTools, setCheckingTools] = useState(false)
+
+  async function recheckTools() {
+    setCheckingTools(true)
+    try {
+      const status = await onRecheckTools()
+      onNotice(status.ok ? { tone: 'success', text: 'FFmpeg is working.' } : { tone: 'error', text: status.message })
+    } catch (e) {
+      onError(e)
+    } finally {
+      setCheckingTools(false)
+    }
+  }
   const [pendingRoot, setPendingRoot] = useState<string | null>(null)
 
   useEffect(() => setAccent(settings.accentColor), [settings.accentColor])
@@ -163,6 +188,28 @@ export function SettingsScreen({ settings, info, onSettingsChanged, onInfoChange
             <dd>{info.version}</dd>
           </div>
           <div>
+            <dt>FFmpeg</dt>
+            <dd data-testid="ffmpeg-status">
+              {!tools && 'Checking…'}
+              {tools?.ok && (
+                <>
+                  {tools.ffmpegVersion}
+                  {tools.license && <span className="muted"> · {tools.license}</span>}
+                  {tools.source !== 'packaged' && <span className="muted"> · {tools.source}</span>}
+                </>
+              )}
+              {tools && !tools.ok && <span className="form-error">{tools.message}</span>}
+            </dd>
+          </div>
+          {tools && (
+            <div>
+              <dt>FFmpeg folder</dt>
+              <dd>
+                <code className="path">{tools.directory}</code>
+              </dd>
+            </div>
+          )}
+          <div>
             <dt>Database schema</dt>
             <dd>v{info.schemaVersion}</dd>
           </div>
@@ -173,9 +220,18 @@ export function SettingsScreen({ settings, info, onSettingsChanged, onInfoChange
             </dd>
           </div>
         </dl>
-        <button type="button" className="btn btn-ghost" onClick={openLogs}>
-          Open logs folder
-        </button>
+        <div className="row">
+          <button type="button" className="btn btn-ghost" onClick={openLogs}>
+            Open logs folder
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={recheckTools} disabled={checkingTools}>
+            {checkingTools ? 'Checking FFmpeg…' : 'Check FFmpeg again'}
+          </button>
+        </div>
+        <p className="muted small">
+          FFmpeg is bundled under the GNU LGPL v3. Its license, notices and source information are in the FFmpeg
+          folder shown above.
+        </p>
       </section>
     </div>
   )

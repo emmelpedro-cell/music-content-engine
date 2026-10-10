@@ -32,19 +32,7 @@ export function PhasePlaceholder({ title, phase, summary, planned }: Placeholder
   )
 }
 
-export const PLACEHOLDERS: Record<'media' | 'create' | 'presets' | 'exports', PlaceholderProps> = {
-  media: {
-    title: 'Media Library',
-    phase: 1,
-    summary: 'A reusable library of your performance clips, close-ups and b-roll, shared across every song.',
-    planned: [
-      'Import files, whole folders or drag-and-drop',
-      'Thumbnails and metadata via FFprobe',
-      'Your own tags and folders — no fixed taxonomy',
-      'Missing-file detection and relinking',
-      'Originals are referenced, never copied or modified'
-    ]
-  },
+export const PLACEHOLDERS: Record<'create' | 'presets' | 'exports', PlaceholderProps> = {
   create: {
     title: 'Create',
     phase: 3,

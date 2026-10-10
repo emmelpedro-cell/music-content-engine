@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { formatDuration, type MediaAsset } from '../../../shared/media'
 import type { Project } from '../../../shared/schemas'
 import { api, errorMessage, unwrap } from '../api'
 import type { NoticeState } from '../components/Notice'
@@ -6,15 +7,27 @@ import { formatDateTime, formatRelative } from '../format'
 
 type Props = {
   projects: Project[] | null
+  assets: MediaAsset[] | null
   selectedId: string | null
   onSelect: (id: string | null) => void
   onNewProject: () => void
   onChanged: () => Promise<void>
+  onOpenLibrary: () => void
   onNotice: (n: NoticeState) => void
   onError: (e: unknown) => void
 }
 
-export function SongsScreen({ projects, selectedId, onSelect, onNewProject, onChanged, onNotice, onError }: Props) {
+export function SongsScreen({
+  projects,
+  assets,
+  selectedId,
+  onSelect,
+  onNewProject,
+  onChanged,
+  onOpenLibrary,
+  onNotice,
+  onError
+}: Props) {
   const selected = projects?.find((p) => p.id === selectedId) ?? projects?.[0] ?? null
 
   return (
@@ -58,6 +71,8 @@ export function SongsScreen({ projects, selectedId, onSelect, onNewProject, onCh
           <ProjectDetail
             key={selected.id}
             project={selected}
+            assets={assets}
+            onOpenLibrary={onOpenLibrary}
             onChanged={onChanged}
             onDeleted={() => onSelect(null)}
             onNotice={onNotice}
@@ -74,12 +89,16 @@ export function SongsScreen({ projects, selectedId, onSelect, onNewProject, onCh
 
 function ProjectDetail({
   project,
+  assets,
+  onOpenLibrary,
   onChanged,
   onDeleted,
   onNotice,
   onError
 }: {
   project: Project
+  assets: MediaAsset[] | null
+  onOpenLibrary: () => void
   onChanged: () => Promise<void>
   onDeleted: () => void
   onNotice: (n: NoticeState) => void
@@ -97,6 +116,17 @@ function ProjectDetail({
   }, [project.title, project.artist])
 
   const dirty = title !== project.title || artist !== (project.artist ?? '')
+  const audioChoices = (assets ?? []).filter((a) => a.kind === 'audio' && a.status === 'ready')
+  const currentAudio = assets?.find((a) => a.id === project.audioAssetId) ?? null
+
+  async function setAudio(audioAssetId: string | null) {
+    try {
+      await unwrap(api.projects.setAudio(project.id, audioAssetId))
+      await onChanged()
+    } catch (e) {
+      onError(e)
+    }
+  }
 
   async function save(event: FormEvent) {
     event.preventDefault()
@@ -171,8 +201,35 @@ function ProjectDetail({
 
       <dl className="facts">
         <div>
-          <dt>Audio</dt>
-          <dd className="muted">{project.sourceAudioPath ?? 'Not imported — audio import arrives in Phase 1'}</dd>
+          <dt>Song audio</dt>
+          <dd>
+            {audioChoices.length > 0 ? (
+              <select
+                className="audio-select"
+                value={project.audioAssetId ?? ''}
+                onChange={(e) => setAudio(e.target.value || null)}
+                aria-label="Song audio"
+                data-testid="song-audio"
+              >
+                <option value="">No audio chosen</option>
+                {audioChoices.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.fileName} ({formatDuration(a.durationSeconds)})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="muted">
+                No audio in the library yet.{' '}
+                <button type="button" className="link-btn" onClick={onOpenLibrary}>
+                  Import it in the Media Library
+                </button>
+              </span>
+            )}
+            {currentAudio?.availability === 'missing' && (
+              <p className="hint">This audio file can’t be found. Relink it in the Media Library.</p>
+            )}
+          </dd>
         </div>
         <div>
           <dt>Created</dt>

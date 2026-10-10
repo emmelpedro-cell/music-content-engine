@@ -8,3 +8,4 @@ playwright-report/
 .vscode/*
 !.vscode/extensions.json
 e2e-data/
+vendor/ffmpeg/

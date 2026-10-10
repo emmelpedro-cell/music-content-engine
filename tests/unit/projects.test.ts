@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { runMigrations } from '../../src/main/db/migrations'
+import type { SqlDriver } from '../../src/main/db/driver'
 import { openDatabase } from '../../src/main/db/open'
 import { NotFoundError, ProjectsRepository } from '../../src/main/repositories/projects'
+import { MediaRepository } from '../../src/main/repositories/media'
 import { CreateProjectInputSchema, UpdateProjectInputSchema } from '../../src/shared/schemas'
 import { createNodeSqliteDriver, memoryLogger, tempDir } from '../helpers/node-sqlite-driver'
 
@@ -14,9 +16,10 @@ function clock(start = Date.parse('2026-10-10T10:00:00.000Z')) {
 
 describe('ProjectsRepository', () => {
   let repo: ProjectsRepository
+  let db: SqlDriver
 
   beforeEach(() => {
-    const db = createNodeSqliteDriver()
+    db = createNodeSqliteDriver()
     runMigrations(db)
     repo = new ProjectsRepository(db, clock())
   })
@@ -25,8 +28,7 @@ describe('ProjectsRepository', () => {
     const created = repo.create(CreateProjectInputSchema.parse({ title: '  Rumelaj  ', artist: 'Luneta' }))
     expect(created.title).toBe('Rumelaj')
     expect(created.artist).toBe('Luneta')
-    expect(created.sourceAudioPath).toBeNull()
-    expect(created.durationSeconds).toBeNull()
+    expect(created.audioAssetId).toBeNull()
     expect(created.id).toMatch(/^[0-9a-f-]{36}$/)
     expect(repo.get(created.id)).toEqual(created)
   })
@@ -62,6 +64,31 @@ describe('ProjectsRepository', () => {
     repo.delete(p.id)
     expect(repo.list()).toEqual([])
     expect(() => repo.get(p.id)).toThrow(NotFoundError)
+  })
+
+  it('links a ready audio asset as the song audio, and rejects anything else', () => {
+    const media = new MediaRepository(db)
+    const p = repo.create(CreateProjectInputSchema.parse({ title: 'Song' }))
+    const audio = media.insertPending({ path: '/m/a.wav', pathKey: '/m/a.wav', size: 1, mtimeMs: 0 })!
+    const video = media.insertPending({ path: '/m/v.mp4', pathKey: '/m/v.mp4', size: 1, mtimeMs: 0 })!
+
+    expect(() => repo.setAudio(p.id, audio.id)).toThrow(/finished importing/)
+    const meta = (kind: 'audio' | 'video') => ({
+      kind,
+      durationSeconds: 3,
+      container: 'wav',
+      bitRate: null,
+      primaryStreamIndex: 0,
+      video: kind === 'video' ? { codec: 'h264', width: 2, height: 2, rotation: 0, frameRate: 30 } : null,
+      audio: { codec: 'pcm_s16le', sampleRate: 48000, channels: 2 }
+    })
+    media.markReady(audio.id, meta('audio'), '{}', null)
+    media.markReady(video.id, meta('video'), '{}', null)
+
+    expect(repo.setAudio(p.id, audio.id).audioAssetId).toBe(audio.id)
+    expect(() => repo.setAudio(p.id, video.id)).toThrow(/audio file/)
+    expect(() => repo.setAudio(p.id, '00000000-0000-4000-8000-000000000000')).toThrow(NotFoundError)
+    expect(repo.setAudio(p.id, null).audioAssetId).toBeNull()
   })
 
   it('reports missing projects as NotFoundError', () => {

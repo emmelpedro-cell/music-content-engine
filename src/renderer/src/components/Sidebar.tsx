@@ -3,7 +3,7 @@ export type ScreenId = 'home' | 'songs' | 'media' | 'create' | 'presets' | 'expo
 const ITEMS: { id: ScreenId; label: string; phase?: number }[] = [
   { id: 'home', label: 'Home' },
   { id: 'songs', label: 'Songs' },
-  { id: 'media', label: 'Media Library', phase: 1 },
+  { id: 'media', label: 'Media Library' },
   { id: 'create', label: 'Create', phase: 3 },
   { id: 'presets', label: 'Presets', phase: 5 },
   { id: 'exports', label: 'Exports', phase: 6 }
@@ -60,7 +60,7 @@ export function Sidebar({ current, onNavigate, version }: Props) {
         >
           Settings
         </button>
-        <p className="build-tag">Phase 0 foundation{version ? ` · v${version}` : ''}</p>
+        <p className="build-tag">Phase 1 · media{version ? ` · v${version}` : ''}</p>
       </div>
     </nav>
   )

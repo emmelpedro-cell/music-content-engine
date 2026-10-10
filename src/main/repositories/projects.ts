@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import type { SqlDriver } from '../db/driver'
 import { transaction } from '../db/driver'
+import { NotFoundError, UnprocessableError } from '../errors'
 import type { CreateProjectData, Project, UpdateProjectData } from '../../shared/schemas'
+
+// Re-exported for existing imports.
+export { NotFoundError }
 
 type SongRow = {
   id: string
   title: string
   artist: string | null
-  source_audio_path: string | null
-  duration_seconds: number | null
+  audio_asset_id: string | null
   created_at: string
   updated_at: string
 }
@@ -18,18 +21,15 @@ function toProject(row: SongRow): Project {
     id: row.id,
     title: row.title,
     artist: row.artist,
-    sourceAudioPath: row.source_audio_path,
-    durationSeconds: row.duration_seconds === null ? null : Number(row.duration_seconds),
+    audioAssetId: row.audio_asset_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }
 }
 
-export class NotFoundError extends Error {
-  override name = 'NotFoundError'
-}
-
-const COLUMNS = 'id, title, artist, source_audio_path, duration_seconds, created_at, updated_at'
+// songs.source_audio_path and songs.duration_seconds (migration v1) are unused since
+// migration v2: the song's audio is a media asset. See TECHNICAL_DECISIONS TD-016.
+const COLUMNS = 'id, title, artist, audio_asset_id, created_at, updated_at'
 
 /**
  * A "project" is a song project (spec §4.2): the song is the unit that owns
@@ -77,6 +77,26 @@ export class ProjectsRepository {
         .prepare('UPDATE songs SET title = ?, artist = ?, updated_at = ? WHERE id = ?')
         .run(title, artist, this.now(), input.id)
       return this.get(input.id)
+    })
+  }
+
+  /** Sets (or clears) the song's audio. The asset must be a ready audio file in the library. */
+  setAudio(id: string, audioAssetId: string | null): Project {
+    return transaction(this.db, () => {
+      this.get(id)
+      if (audioAssetId !== null) {
+        const asset = this.db
+          .prepare('SELECT kind, status FROM media_assets WHERE id = ?')
+          .get(audioAssetId) as { kind: string | null; status: string } | undefined
+        if (!asset) throw new NotFoundError('That audio file is no longer in the library.')
+        if (asset.kind !== 'audio' || asset.status !== 'ready') {
+          throw new UnprocessableError('Choose an audio file that has finished importing.')
+        }
+      }
+      this.db
+        .prepare('UPDATE songs SET audio_asset_id = ?, updated_at = ? WHERE id = ?')
+        .run(audioAssetId, this.now(), id)
+      return this.get(id)
     })
   }
 

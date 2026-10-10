@@ -18,8 +18,8 @@ export const ProjectSchema = z.object({
   id: ProjectIdSchema,
   title: z.string(),
   artist: z.string().nullable(),
-  sourceAudioPath: z.string().nullable(),
-  durationSeconds: z.number().nonnegative().nullable(),
+  /** Library asset used as this song's audio (Phase 1). */
+  audioAssetId: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string()
 })
@@ -50,6 +50,11 @@ export const UpdateProjectInputSchema = z
   })
 export type UpdateProjectInput = z.input<typeof UpdateProjectInputSchema>
 export type UpdateProjectData = z.output<typeof UpdateProjectInputSchema>
+
+export const SetProjectAudioInputSchema = z
+  .object({ id: ProjectIdSchema, audioAssetId: z.string().uuid('Invalid asset id').nullable() })
+  .strict()
+export type SetProjectAudioInput = z.infer<typeof SetProjectAudioInputSchema>
 
 export const ProjectIdInputSchema = z.object({ id: ProjectIdSchema }).strict()
 export type ProjectIdInput = z.infer<typeof ProjectIdInputSchema>
@@ -113,7 +118,14 @@ export type LogWriteInput = z.infer<typeof LogWriteInputSchema>
 /** No input expected. Accepts undefined or an empty object, nothing else. */
 export const EmptyInputSchema = z.union([z.undefined(), z.object({}).strict()])
 
-export type IpcErrorCode = 'VALIDATION' | 'NOT_FOUND' | 'FORBIDDEN' | 'INTERNAL'
+export type IpcErrorCode =
+  | 'VALIDATION'
+  | 'NOT_FOUND'
+  | 'FORBIDDEN'
+  | 'UNAVAILABLE'
+  | 'CONFLICT'
+  | 'UNPROCESSABLE'
+  | 'INTERNAL'
 
 export type IpcResult<T> =
   | { ok: true; data: T }
