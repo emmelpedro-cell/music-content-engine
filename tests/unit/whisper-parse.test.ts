@@ -91,6 +91,18 @@ describe('whisper output', () => {
     expect(doc.lines.map(lineText)).toEqual(['फालाना थालाना थालाना', `[${LOOP_LABEL}]`, 'अच्छ'])
   })
 
+  it('collapses a loop of two alternating lines', () => {
+    // Real case (English mode on a Nepali rap): two lines alternating for the whole song.
+    const segments: ReturnType<typeof segment>[] = []
+    for (let r = 0; r < 20; r++) {
+      const t = r * 2000
+      ;['The', 'song', 'is'].forEach((w, i) => segments.push(segment(` ${w}`, t + i * 100, t + i * 100 + 100)))
+      ;['"Baddy', 'On"', 'by', 'the', 'end.'].forEach((w, i) => segments.push(segment(` ${w}`, t + 1000 + i * 100, t + 1100 + i * 100)))
+    }
+    const doc = transcriptToDocument(parseWhisperJson(JSON.stringify({ transcription: segments })))
+    expect(doc.lines.map(lineText)).toEqual(['The song is', '"Baddy On" by the end.', `[${LOOP_LABEL}]`])
+  })
+
   it('keeps a line repeated a few times, like a real chorus', () => {
     const phrase = 'Tipo quando ela rebola'.split(' ')
     const segments: ReturnType<typeof segment>[] = []

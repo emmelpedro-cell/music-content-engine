@@ -102,26 +102,34 @@ export const LOOP_LABEL = 'Repeated phrase removed (probably a transcription err
  * Real choruses rarely repeat one line six times in a row; if they do, the marker says so.
  */
 export function collapseRepetitionLoops(lines: LyricLine[]): LyricLine[] {
-  const key = (l: LyricLine) => l.words.map((w) => w.text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')).join(' ')
+  const key = (l: LyricLine) => l.words.map((w) => w.text.toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '')).join(' ')
+  const keys = lines.map(key)
   const out: LyricLine[] = []
   let i = 0
   while (i < lines.length) {
-    let j = i + 1
-    const k = key(lines[i]!)
-    while (k && j < lines.length && key(lines[j]!) === k) j++
-    if (j - i >= LOOP_MIN_REPEATS) {
+    let collapsed = false
+    // A cycle of 1–3 lines repeated LOOP_MIN_REPEATS times or more ("The song is" /
+    // "… by the end of the song." alternating for a whole song is a real case).
+    for (let n = 1; n <= 3 && !collapsed; n++) {
+      const unit = keys.slice(i, i + n)
+      if (unit.length < n || unit.some((k) => !k)) break
+      let reps = 1
+      while (i + (reps + 1) * n <= lines.length && keys.slice(i + reps * n, i + (reps + 1) * n).every((k, x) => k === unit[x])) reps++
+      if (reps < LOOP_MIN_REPEATS) continue
+      let j = i + reps * n
       // A loop often wobbles ("… ela se sobe" → "Pero que ela se sobe"): absorb near-copies too.
-      while (j < lines.length && (key(lines[j]!) === k || overlap(key(lines[j]!), k) >= 0.6)) j++
-      out.push(lines[i]!, lines[i + 1]!)
-      const removed = lines.slice(i + 2, j)
+      while (j < lines.length && unit.some((k) => keys[j] === k || overlap(keys[j]!, k) >= 0.6)) j++
+      const keep = Math.min(2, n === 1 ? 2 : 1) * n
+      out.push(...lines.slice(i, i + keep))
+      const removed = lines.slice(i + keep, j)
       const start = removed[0]!.words[0]?.start ?? null
       const lastWords = removed[removed.length - 1]!.words
       const end = lastWords[lastWords.length - 1]?.end ?? null
       out.push({ id: newId('l'), kind: 'instrumental', words: [], label: LOOP_LABEL, start, end })
-    } else {
-      out.push(...lines.slice(i, j))
+      i = j
+      collapsed = true
     }
-    i = j
+    if (!collapsed) out.push(lines[i++]!)
   }
   return out
 }

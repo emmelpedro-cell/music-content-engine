@@ -164,6 +164,20 @@ describe('alignToTimings', () => {
     expect(doc.lines.flatMap((l) => l.words).every((w) => w.start !== null)).toBe(true)
   })
 
+  it('combines several transcriptions, keeping matches in time order', () => {
+    // Real case: a Nepali/English rap transcribed twice (Nepali mode heard the Nepali verse,
+    // Hindi mode heard the English verse); one run also misplaced a copy of the first line.
+    const doc = (words: [string, number][]): LyricDocument => ({
+      version: 1,
+      lines: [{ id: 'l', kind: 'lyric', words: words.map(([text, start], i) => ({ id: `w${i}`, text, start, end: start + 0.4 })) }]
+    })
+    const nepali = doc([['जिवन', 30], ['छ', 30.5], ['भारी', 31], ['यो', 31.5]])
+    const hindi = doc([['जिवन', 19], ['never', 40], ['on', 40.5], ['the', 41], ['bench', 41.5]])
+    const aligned = alignToTimings('Jiwan cha vari yo\nNever on the bench', [nepali, hindi])
+    expect(aligned.lines[0]!.words[0]!.start).toBe(30)
+    expect(aligned.lines[1]!.words.map((w) => w.start)).toEqual([40, 40.5, 41, 41.5])
+  })
+
   it('leaves text untimed when there is nothing to align with', () => {
     const doc = alignToTimings('only text', { version: 1, lines: [] })
     expect(doc.lines[0]!.words.every((w) => w.start === null)).toBe(true)

@@ -275,12 +275,19 @@ const normalizeToken = (t: string) =>
  * Words are matched with an edit-distance alignment; unmatched words get
  * times interpolated from their matched neighbours.
  */
-export function alignToTimings(text: string, timed: LyricDocument): LyricDocument {
+export function alignToTimings(text: string, timed: LyricDocument | LyricDocument[]): LyricDocument {
   const target = parseLyrics(text, 'txt')
-  const source = wordsOf(timed).filter((w) => w.start !== null)
   const words = target.lines.flatMap((l) => l.words)
-  if (!source.length || !words.length) return target
+  const sources = (Array.isArray(timed) ? timed : [timed]).map((d) => wordsOf(d).filter((w) => w.start !== null)).filter((s) => s.length)
+  if (!sources.length || !words.length) return target
+  // Several transcriptions of the same song (e.g. one per language for a song that mixes
+  // languages): anchor words with each, then keep the largest set that stays in time order.
+  const timing = combineAnchors(sources.map((source) => anchorWords(words, source)), words.length)
+  return applyAnchors(target, timing)
+}
 
+/** Lyric word index → timing taken from the transcription, for the words that matched. */
+function anchorWords(words: LyricWord[], source: LyricWord[]): Map<number, Timing> {
   const a = words.map((w) => normalizeToken(w.text))
   const b = source.map((w) => normalizeToken(w.text))
   const n = a.length
@@ -321,7 +328,43 @@ export function alignToTimings(text: string, timed: LyricDocument): LyricDocumen
     const phonetic = alignPhonetic(words, source)
     if (phonetic.size > timing.size) timing = phonetic
   }
+  return timing
+}
 
+/**
+ * Merges anchor sets: for each word, any anchor may be used, but the chosen anchors must
+ * keep the words in time order. Picks the largest such set (longest increasing chain).
+ */
+function combineAnchors(sets: Map<number, Timing>[], count: number): Map<number, Timing> {
+  if (sets.length === 1) return sets[0]!
+  const candidates: { word: number; t: Timing }[] = []
+  for (let w = 0; w < count; w++) {
+    for (const set of sets) {
+      const t = set.get(w)
+      if (t && t.start !== null) candidates.push({ word: w, t })
+    }
+  }
+  // Longest chain with strictly increasing word index and non-decreasing start time.
+  const best = candidates.map(() => 1)
+  const prev = candidates.map(() => -1)
+  for (let i = 0; i < candidates.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const a = candidates[j]!
+      const b = candidates[i]!
+      if (a.word < b.word && a.t.start! <= b.t.start! && best[j]! + 1 > best[i]!) {
+        best[i] = best[j]! + 1
+        prev[i] = j
+      }
+    }
+  }
+  let end = -1
+  for (let i = 0; i < candidates.length; i++) if (end < 0 || best[i]! > best[end]!) end = i
+  const result = new Map<number, Timing>()
+  for (let i = end; i >= 0; i = prev[i]!) result.set(candidates[i]!.word, candidates[i]!.t)
+  return result
+}
+
+function applyAnchors(target: LyricDocument, timing: Map<number, Timing>): LyricDocument {
   let k = 0
   const lines = target.lines.map((line) => {
     if (line.kind !== 'lyric') return line
@@ -379,9 +422,9 @@ function alignPhonetic(words: LyricWord[], source: LyricWord[]): Map<number, Tim
     }
     return dp[y.length]! / Math.max(x.length, y.length)
   }
-  // A word pair counts as the same word when at most a third of the sounds differ and
-  // there are at least two sounds to compare.
-  const same = (x: string, y: string) => Math.min(x.length, y.length) >= 2 && distance(x, y) <= 1 / 3
+  // A word pair counts as the same word when it starts with the same sound, at most a third
+  // of the sounds differ, and there are at least two sounds to compare.
+  const same = (x: string, y: string) => Math.min(x.length, y.length) >= 2 && x[0] === y[0] && distance(x, y) <= 1 / 3
   const SKIP_TARGET = 1
   const SKIP_SOURCE = 0.5
   const cost = new Float32Array((n + 1) * (m + 1))
