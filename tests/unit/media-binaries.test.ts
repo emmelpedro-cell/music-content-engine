@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { resolveMediaTools, verifyMediaTools } from '../../src/main/media/binaries'
 import { MediaToolsManager } from '../../src/main/media/tools-manager'
 import { UnavailableError } from '../../src/main/errors'
@@ -33,7 +33,8 @@ describe('resolveMediaTools', () => {
     for (const isPackaged of [true, false]) {
       const loc = resolveMediaTools({ ...base, isPackaged, platform: 'linux', env: { MCE_FFMPEG_DIR: '/custom/ff' } })
       expect(loc.source).toBe('environment')
-      expect(loc.ffmpeg).toBe(join('/custom/ff', 'bin', 'ffmpeg'))
+      // Resolved to an absolute path (on Windows this gains the current drive letter).
+      expect(loc.ffmpeg).toBe(join(resolve('/custom/ff'), 'bin', 'ffmpeg'))
     }
   })
 
