@@ -1,0 +1,22 @@
+name: ffmpeg-discover
+on: push
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List LGPL assets and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG=autobuild-2026-09-30-13-08
+          gh release view "$TAG" -R BtbN/FFmpeg-Builds --json assets --jq '.assets[].name' > names.txt
+          grep -E '(win64|linux64)-lgpl' names.txt | grep -v shared | sort > lgpl.txt
+          out=""
+          for n in $(cat lgpl.txt); do
+            curl -sSL -o "$n" "https://github.com/BtbN/FFmpeg-Builds/releases/download/$TAG/$n"
+            out="$out$(sha256sum "$n" | cut -d' ' -f1) $(stat -c %s "$n") $n%0A"
+            rm -f "$n"
+          done
+          echo "::notice title=lgpl-assets::$out"
+          echo "::notice title=all-names::$(tr '\n' ' ' < names.txt | head -c 3500)"
