@@ -83,7 +83,49 @@ export function transcriptToDocument(output: WhisperOutput, options: TranscriptT
     current.push(word)
   }
   flush()
-  return { version: 1, lines }
+  return { version: 1, lines: collapseRepetitionLoops(lines) }
+}
+
+/** Whisper sometimes gets stuck repeating one phrase when the voice stops (a "repetition loop"). */
+export const LOOP_MIN_REPEATS = 6
+export const LOOP_LABEL = 'Repeated phrase removed (probably a transcription error) – check this part'
+
+/**
+ * Collapses a run of at least LOOP_MIN_REPEATS identical consecutive lines: the first
+ * two are kept and the rest becomes a marked section, so the user can check it by ear.
+ * Real choruses rarely repeat one line six times in a row; if they do, the marker says so.
+ */
+export function collapseRepetitionLoops(lines: LyricLine[]): LyricLine[] {
+  const key = (l: LyricLine) => l.words.map((w) => w.text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')).join(' ')
+  const out: LyricLine[] = []
+  let i = 0
+  while (i < lines.length) {
+    let j = i + 1
+    const k = key(lines[i]!)
+    while (k && j < lines.length && key(lines[j]!) === k) j++
+    if (j - i >= LOOP_MIN_REPEATS) {
+      // A loop often wobbles ("… ela se sobe" → "Pero que ela se sobe"): absorb near-copies too.
+      while (j < lines.length && (key(lines[j]!) === k || overlap(key(lines[j]!), k) >= 0.6)) j++
+      out.push(lines[i]!, lines[i + 1]!)
+      const removed = lines.slice(i + 2, j)
+      const start = removed[0]!.words[0]?.start ?? null
+      const lastWords = removed[removed.length - 1]!.words
+      const end = lastWords[lastWords.length - 1]?.end ?? null
+      out.push({ id: newId('l'), kind: 'instrumental', words: [], label: LOOP_LABEL, start, end })
+    } else {
+      out.push(...lines.slice(i, j))
+    }
+    i = j
+  }
+  return out
+}
+
+/** Share of the words of `a` that also occur in `b`. */
+function overlap(a: string, b: string): number {
+  const wa = a.split(' ').filter(Boolean)
+  if (!wa.length) return 0
+  const wb = new Set(b.split(' '))
+  return wa.filter((w) => wb.has(w)).length / wa.length
 }
 
 const PHRASE_START = /^["'¿¡(]?\p{Lu}(?:\p{Ll}|$)/u

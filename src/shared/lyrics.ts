@@ -334,7 +334,57 @@ export function alignToTimings(text: string, timed: LyricDocument): LyricDocumen
       lines[li] = interpolateLine(line, { start: prevEnd, end: nextStart })
     }
   }
+  fillLineEdges(lines)
   return { version: 1, lines }
+}
+
+/** Typical length of one sung word, used to place unmatched words at the edges of a line. */
+const WORD_SECONDS = 0.35
+
+/**
+ * Words before the first matched word of a line (or after the last) have nothing to
+ * interpolate between. Place them just before / after their line's timed words, without
+ * crossing into the neighbouring lines.
+ */
+function fillLineEdges(lines: LyricLine[]): void {
+  let prevEnd = 0
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li]!
+    if (line.kind !== 'lyric') {
+      if (line.end != null) prevEnd = line.end
+      continue
+    }
+    const words = line.words.map((w) => ({ ...w }))
+    const first = words.findIndex((w) => w.start !== null)
+    if (first < 0) continue
+    if (first > 0) {
+      const anchor = words[first]!.start!
+      const from = Math.max(prevEnd, anchor - first * WORD_SECONDS)
+      const step = (anchor - from) / first
+      for (let i = 0; i < first; i++) {
+        words[i]!.start = round3(from + i * step)
+        words[i]!.end = round3(from + (i + 1) * step)
+      }
+    }
+    let last = words.length - 1
+    while (words[last]!.start === null) last--
+    const trailing = words.length - 1 - last
+    if (trailing > 0) {
+      const nextStart = lines
+        .slice(li + 1)
+        .map((l) => lineRange(l).start)
+        .find((t): t is number => t !== null)
+      const from = words[last]!.end ?? words[last]!.start!
+      const to = Math.min(nextStart ?? Infinity, from + trailing * WORD_SECONDS)
+      const step = Math.max(0, to - from) / trailing
+      for (let i = 1; i <= trailing; i++) {
+        words[last + i]!.start = round3(from + (i - 1) * step)
+        words[last + i]!.end = round3(from + i * step)
+      }
+    }
+    lines[li] = { ...line, words }
+    prevEnd = lineRange(lines[li]!).end ?? prevEnd
+  }
 }
 
 function similar(x: string, y: string): boolean {

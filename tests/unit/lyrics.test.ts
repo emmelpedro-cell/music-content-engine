@@ -101,6 +101,23 @@ describe('alignToTimings', () => {
     expect(doc.lines[1]!.words[0]!.start).toBe(13)
   })
 
+  it('times unmatched words at the start or end of a line next to its matched words', () => {
+    // Real case: Whisper heard "Trilhinho" where the singer sang "Treinei de fininho".
+    const doc = alignToTimings('Treinei de fininho dance with me\nTonight oh yeah', transcript)
+    const [l1, l2] = doc.lines
+    expect(doc.lines.flatMap((l) => l.words).every((w) => w.start !== null)).toBe(true)
+    // Leading words sit just before "dance" (11 s), at most ~0.35 s each, after time 0.
+    const lead = l1!.words.slice(0, 3).map((w) => w.start!)
+    expect(lead[0]).toBeGreaterThanOrEqual(11 - 3 * 0.35 - 1e-9)
+    expect(lead[2]).toBeLessThan(11)
+    expect([...lead].sort((x, y) => x - y)).toEqual(lead)
+    // Trailing words follow "Tonight" (13 s) in order.
+    const tail = l2!.words.map((w) => w.start!)
+    expect(tail[0]).toBe(13)
+    expect(tail[1]).toBeGreaterThan(13)
+    expect(tail[2]).toBeGreaterThan(tail[1]!)
+  })
+
   it('leaves text untimed when there is nothing to align with', () => {
     const doc = alignToTimings('only text', { version: 1, lines: [] })
     expect(doc.lines[0]!.words.every((w) => w.start === null)).toBe(true)

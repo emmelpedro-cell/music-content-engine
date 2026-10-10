@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseWhisperJson, transcriptToDocument } from '../../src/main/transcription/parse'
+import { LOOP_LABEL, parseWhisperJson, transcriptToDocument } from '../../src/main/transcription/parse'
 import { lineText } from '../../src/shared/lyrics'
 
 /** Shape of `whisper-cli -ml 1 -sow -ojf` output (v1.8.4), recorded on Windows. */
@@ -61,6 +61,32 @@ describe('whisper output', () => {
       'Se o tempo acabou',
       'E tudo muda se só mudo o nome I know'
     ])
+  })
+
+  it('collapses a Whisper repetition loop into a marked section', () => {
+    // Real case: after the last verse Whisper wrote one phrase 25 times while only the beat played.
+    const phrase = 'Tipo quando ela se sobe'.split(' ')
+    const segments = [segment(' É', 0, 200), segment(' difícil', 200, 600), segment(' ter', 600, 800), segment(' volta', 800, 1200)]
+    for (let r = 0; r < 25; r++) {
+      // One repetition drifts, as in the real output.
+      const words = r === 19 ? ['Pero', 'que', 'ela', 'se', 'sobe'] : phrase
+      words.forEach((w, i) => segments.push(segment(` ${w}`, 2000 + r * 1000 + i * 200, 2000 + r * 1000 + i * 200 + 200)))
+    }
+    const doc = transcriptToDocument(parseWhisperJson(JSON.stringify({ transcription: segments })))
+    expect(doc.lines.map(lineText)).toEqual([
+      'É difícil ter volta',
+      'Tipo quando ela se sobe',
+      'Tipo quando ela se sobe',
+      `[${LOOP_LABEL}]`
+    ])
+    expect(doc.lines[3]).toMatchObject({ kind: 'instrumental', start: 4, end: 27 })
+  })
+
+  it('keeps a line repeated a few times, like a real chorus', () => {
+    const phrase = 'Tipo quando ela rebola'.split(' ')
+    const segments: ReturnType<typeof segment>[] = []
+    for (let r = 0; r < 4; r++) phrase.forEach((w, i) => segments.push(segment(` ${w}`, r * 1000 + i * 200, r * 1000 + i * 200 + 200)))
+    expect(transcriptToDocument(parseWhisperJson(JSON.stringify({ transcription: segments }))).lines).toHaveLength(4)
   })
 
   it('tolerates raw control characters in the JSON', () => {
