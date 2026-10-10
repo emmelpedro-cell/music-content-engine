@@ -178,6 +178,24 @@ describe('alignToTimings', () => {
     expect(aligned.lines[1]!.words.map((w) => w.start)).toEqual([40, 40.5, 41, 41.5])
   })
 
+  it('drops a wrong match that would make the singing impossibly fast, and fills the gap', () => {
+    // Real case: one line matched 5 s too late, squeezing the next lines into one second.
+    const t = (text: string, start: number) => ({ id: text, text, start, end: start + 0.3 })
+    const transcript: LyricDocument = {
+      version: 1,
+      lines: [{ id: 'l', kind: 'lyric', words: [t('groove', 52), t('feri', 59.9), t('jaam', 60.2), t('mero', 61.1)] }]
+    }
+    const lyrics = 'Gardai chu groove\nVandai chan feri\nChaina re cool\nTesaile prove gardai chu mera yi sabda\nGardaichan nanga naach\nChakka jaam\nGame mero'
+    const doc = alignToTimings(lyrics, transcript)
+    const starts = doc.lines.map((l) => l.words[0]!.start!)
+    expect(doc.lines.flatMap((l) => l.words).every((w) => w.start !== null)).toBe(true)
+    // "Vandai chan feri" now follows "groove" instead of jumping to 59.9 s.
+    expect(starts[1]).toBeLessThan(55)
+    // No stretch faster than 8 words per second.
+    const all = doc.lines.flatMap((l) => l.words.map((w) => w.start!))
+    for (let i = 0; i + 8 < all.length; i++) expect(all[i + 8]! - all[i]!).toBeGreaterThanOrEqual(0.99)
+  })
+
   it('leaves text untimed when there is nothing to align with', () => {
     const doc = alignToTimings('only text', { version: 1, lines: [] })
     expect(doc.lines[0]!.words.every((w) => w.start === null)).toBe(true)

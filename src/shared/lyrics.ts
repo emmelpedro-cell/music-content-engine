@@ -282,7 +282,7 @@ export function alignToTimings(text: string, timed: LyricDocument | LyricDocumen
   if (!sources.length || !words.length) return target
   // Several transcriptions of the same song (e.g. one per language for a song that mixes
   // languages): anchor words with each, then keep the largest set that stays in time order.
-  const timing = combineAnchors(sources.map((source) => anchorWords(words, source)), words.length)
+  const timing = pruneImplausibleAnchors(combineAnchors(sources.map((source) => anchorWords(words, source)), words.length))
   return applyAnchors(target, timing)
 }
 
@@ -364,6 +364,43 @@ function combineAnchors(sets: Map<number, Timing>[], count: number): Map<number,
   return result
 }
 
+/** Faster than this (words per second between two anchors) nobody sings, not even in rap. */
+const MAX_WORDS_PER_SECOND = 8
+
+/**
+ * A wrong match leaves an impossible pace: e.g. 25 words squeezed into one second before
+ * it, after five empty seconds. Drops such anchors (the one next to the emptier side, which
+ * is the one that slipped) until every stretch between anchors can be sung.
+ */
+function pruneImplausibleAnchors(timing: Map<number, Timing>): Map<number, Timing> {
+  const result = new Map(timing)
+  for (let guard = 0; guard < 1000; guard++) {
+    const idx = [...result.keys()].sort((x, y) => x - y)
+    let worst = -1
+    let worstRate = MAX_WORDS_PER_SECOND
+    for (let i = 0; i + 1 < idx.length; i++) {
+      const a = idx[i]!
+      const b = idx[i + 1]!
+      const span = result.get(b)!.start! - result.get(a)!.start!
+      const rate = (b - a) / Math.max(0.05, span)
+      if (rate > worstRate) {
+        worstRate = rate
+        worst = i
+      }
+    }
+    if (worst < 0) break
+    const a = idx[worst]!
+    const b = idx[worst + 1]!
+    // Pace of the neighbouring stretches: the anchor bordering the slower one moved too far.
+    const pace = (x: number | undefined, y: number | undefined) =>
+      x === undefined || y === undefined ? Infinity : (y - x) / Math.max(0.05, result.get(y)!.start! - result.get(x)!.start!)
+    const before = pace(idx[worst - 1], a)
+    const after = pace(b, idx[worst + 2])
+    result.delete(before < after ? a : b)
+  }
+  return result
+}
+
 function applyAnchors(target: LyricDocument, timing: Map<number, Timing>): LyricDocument {
   let k = 0
   const lines = target.lines.map((line) => {
@@ -372,24 +409,72 @@ function applyAnchors(target: LyricDocument, timing: Map<number, Timing>): Lyric
       ...line,
       words: line.words.map((w) => {
         const src = timing.get(k++)
-        return src ? { ...w, start: src.start, end: src.end, confidence: src.confidence ?? null } : w
+        if (!src || src.start === null) return w
+        // Whisper sometimes stretches a word over a passage it didn't hear; a stretched word
+        // would hold a caption on screen for seconds.
+        const end = src.end === null ? null : round3(Math.min(src.end, src.start + MAX_WORD_SECONDS))
+        return { ...w, start: src.start, end, confidence: src.confidence ?? null }
       })
     }
     return interpolateLine(aligned)
   })
-  // Lines with no matched word at all: place them between neighbouring lines.
-  for (let li = 0; li < lines.length; li++) {
-    const line = lines[li]!
-    if (line.kind !== 'lyric' || line.words.some((w) => w.start !== null)) continue
-    const prevEnd = lines.slice(0, li).map((l) => lineRange(l).end).filter((t): t is number => t !== null).pop()
-    const nextStart = lines.slice(li + 1).map((l) => lineRange(l).start).find((t): t is number => t !== null)
-    if (prevEnd !== undefined && nextStart !== undefined && nextStart > prevEnd) {
-      lines[li] = interpolateLine(line, { start: prevEnd, end: nextStart })
-    }
-  }
+  placeUntimedLines(lines)
   fillLineEdges(lines)
   return { version: 1, lines }
 }
+
+/** Longest time one word is shown as sung when its timing came from a transcription. */
+const MAX_WORD_SECONDS = 2
+
+/**
+ * Lines with no matched word at all (Whisper didn't hear them) are spread over the gap
+ * between the neighbouring timed lines, in proportion to their length. A run of several
+ * such lines shares the gap. When the gap is too short, the previous line's last word is
+ * shortened to make room.
+ */
+function placeUntimedLines(lines: LyricLine[]): void {
+  const timed = (l: LyricLine) => l.kind === 'lyric' && l.words.some((w) => w.start !== null)
+  let li = 0
+  while (li < lines.length) {
+    if (lines[li]!.kind !== 'lyric' || timed(lines[li]!) || !lines[li]!.words.length) {
+      li++
+      continue
+    }
+    let lj = li
+    while (lj + 1 < lines.length && lines[lj + 1]!.kind === 'lyric' && !timed(lines[lj + 1]!)) lj++
+    const run = lines.slice(li, lj + 1)
+    let p = li - 1
+    while (p >= 0 && lineRange(lines[p]!).end === null) p--
+    let q = lj + 1
+    while (q < lines.length && lineRange(lines[q]!).start === null) q++
+    if (p >= 0 && q < lines.length) {
+      const nextStart = lineRange(lines[q]!).start!
+      let prevEnd = lineRange(lines[p]!).end!
+      const wordsInRun = run.reduce((a, l) => a + l.words.length, 0)
+      const needed = wordsInRun * MIN_WORD_SECONDS
+      const prev = lines[p]!
+      const last = prev.kind === 'lyric' ? [...prev.words].reverse().find((w) => w.start !== null) : undefined
+      if (nextStart - prevEnd < needed && last) {
+        const earliest = last.start! + MIN_WORD_SECONDS
+        prevEnd = Math.max(earliest, Math.min(prevEnd, nextStart - needed))
+        lines[p] = { ...prev, words: prev.words.map((w) => (w === last ? { ...w, end: round3(prevEnd) } : w)) }
+      }
+      if (nextStart > prevEnd) {
+        let t = prevEnd
+        const span = nextStart - prevEnd
+        for (let r = li; r <= lj; r++) {
+          const share = (span * lines[r]!.words.length) / wordsInRun
+          lines[r] = interpolateLine(lines[r]!, { start: round3(t), end: round3(t + share) })
+          t += share
+        }
+      }
+    }
+    li = lj + 1
+  }
+}
+
+/** Shortest time given to one word when making room for lines Whisper missed. */
+const MIN_WORD_SECONDS = 0.2
 
 type Timing = { start: number | null; end: number | null; confidence?: number | null }
 
