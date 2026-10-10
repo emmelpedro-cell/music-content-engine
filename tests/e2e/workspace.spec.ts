@@ -119,7 +119,7 @@ test('analyses a song, shows its beats on the waveform and keeps corrections, ly
   await page.getByTestId('paste-lyrics').click()
   await page.getByTestId('paste-text').fill('Rumelaj, rumelaj, vem\nDança comigo na luz')
   await page.getByTestId('paste-apply').click()
-  await expect(page.getByTestId('word')).toHaveCount(8)
+  await expect(page.getByTestId('word')).toHaveCount(7)
   await expect(page.getByTestId('lyrics-status')).toContainText('Draft')
   await page.getByTestId('confirm-lyrics').click()
   await expect(page.getByTestId('lyrics-status')).toContainText('Checked')

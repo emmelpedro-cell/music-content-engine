@@ -13,7 +13,7 @@ import {
   setWordText,
   shiftLine,
   splitLineAt
-} from '../../src/renderer/src/workspace/lyricEdits'
+} from '../../src/shared/lyric-edits'
 
 function doc(): LyricDocument {
   return {

@@ -1,4 +1,4 @@
-import { interpolateLine, newId, type LyricDocument, type LyricLine, type LyricWord } from '../../../shared/lyrics'
+import { interpolateLine, newId, type LyricDocument, type LyricLine, type LyricWord } from './lyrics'
 
 /** Pure edit operations on a lyric document; each returns a new document. */
 

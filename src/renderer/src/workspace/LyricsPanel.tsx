@@ -26,7 +26,7 @@ import {
   setWordText,
   shiftLine,
   splitLineAt
-} from './lyricEdits'
+} from '../../../shared/lyric-edits'
 import { formatClock, type Selection } from './Timeline'
 import { TranscriptionBox } from './TranscriptionBox'
 
