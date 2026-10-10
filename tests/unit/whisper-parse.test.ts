@@ -51,6 +51,18 @@ describe('whisper output', () => {
     expect(doc.lines.map((l) => l.words.length)).toEqual([10, 10, 5])
   })
 
+  it('starts a new line where Whisper starts a new phrase, even without a pause (rap)', () => {
+    // Recorded from a real Portuguese rap verse: no gaps between words, phrases capitalised.
+    const words = 'Pergunta onde eu vou Onde que eu tô Se o tempo acabou E tudo muda se só mudo o nome I know'.split(' ')
+    const rap = { transcription: words.map((w, i) => segment(` ${w}`, i * 250, i * 250 + 250)) }
+    expect(transcriptToDocument(parseWhisperJson(JSON.stringify(rap))).lines.map(lineText)).toEqual([
+      'Pergunta onde eu vou',
+      'Onde que eu tô',
+      'Se o tempo acabou',
+      'E tudo muda se só mudo o nome I know'
+    ])
+  })
+
   it('tolerates raw control characters in the JSON', () => {
     const raw = JSON.stringify({ transcription: [segment(' ok', 0, 100)] }).replace(' ok', ' o\u0001k')
     expect(transcriptToDocument(parseWhisperJson(raw)).lines[0]!.words[0]!.text).toBe('ok')

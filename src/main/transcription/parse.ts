@@ -40,12 +40,14 @@ export type TranscriptToDocumentOptions = {
 
 /**
  * Turns word segments into lyric lines. A new line starts after sentence
- * punctuation, after a pause, or when a line gets long. Non-speech markers
+ * punctuation, after a pause, where Whisper started a new phrase (it capitalises
+ * the first word of each phrase; rap and fast singing often have no pauses), or
+ * when a line gets long. Non-speech markers
  * such as "[Music]" or "♪" are dropped; lone punctuation joins the previous word.
  */
 export function transcriptToDocument(output: WhisperOutput, options: TranscriptToDocumentOptions = {}): LyricDocument {
   const pause = options.pause ?? 0.8
-  const maxWords = options.maxWordsPerLine ?? 10
+  const maxWords = options.maxWordsPerLine ?? 12
   const words: LyricWord[] = []
 
   for (const segment of output.transcription) {
@@ -76,11 +78,15 @@ export function transcriptToDocument(output: WhisperOutput, options: TranscriptT
   }
   for (const word of words) {
     const prev = current[current.length - 1]
-    if (prev && ((word.start ?? 0) - (prev.end ?? 0) > pause || SENTENCE_END.test(prev.text) || current.length >= maxWords)) flush()
+    const newPhrase = current.length >= 2 && PHRASE_START.test(word.text) && !ENGLISH_I.test(word.text)
+    if (prev && ((word.start ?? 0) - (prev.end ?? 0) > pause || SENTENCE_END.test(prev.text) || newPhrase || current.length >= maxWords)) flush()
     current.push(word)
   }
   flush()
   return { version: 1, lines }
 }
+
+const PHRASE_START = /^["'¿¡(]?\p{Lu}(?:\p{Ll}|$)/u
+const ENGLISH_I = /^I(?:'|’|$)/
 
 const round3 = (v: number) => Math.round(v * 1000) / 1000

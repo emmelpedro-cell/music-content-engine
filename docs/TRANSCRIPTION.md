@@ -65,7 +65,7 @@ Models can be deleted from the Lyrics tab. They live in `app-data/models/` and a
 
 1. FFmpeg converts the song to a temporary 16 kHz mono WAV in `app-data/temp` (named `mce-…`, removed afterwards and at startup).
 2. `whisper-cli` runs with one word per segment (`-ml 1 -sow`), full JSON output (`-ojf`) and progress (`-pp`). The language is chosen by the user or detected.
-3. The JSON is parsed into words with start/end times and confidence. Special tokens are dropped, and words are grouped into lines at pauses and sentence ends.
+3. The JSON is parsed into words with start/end times and confidence. Special tokens are dropped, and words are grouped into lines at pauses, sentence ends and the start of each phrase Whisper recognised (rap and fast singing often have no pauses).
 4. The result is stored as the song's **original transcription**. If the user hasn't written any lyrics yet, it also becomes the editable draft. Otherwise the user's lyrics are kept and the Lyrics tab offers **Use latest transcription**.
 
 Only one transcription runs at a time. It can be cancelled, and quitting the app stops it; an interrupted transcription is marked as such at the next start.

@@ -41,7 +41,9 @@ Acceptance criterion: _the user can verify lyrics and inspect beat markers again
 
 **Real song check (2026-10-10):** "Indian Fall 2" (Luneta, 2:58, FL Studio export) analysed with the app's code: 109.0 BPM, 79 bars, tempo confidence 89 %, no warnings, 1.8 s for the whole song. All 38 loudest hits in the track (one every two bars) fall on detected beats and on bar lines. The artist listened to the song mixed with a click on every detected beat and confirmed the tempo is right.
 
-Not yet checked by hand: the installer on a real PC, and transcription of real sung music (only speech is tested automatically).
+**Real transcription check (2026-10-10):** the same song (Portuguese rap) transcribed with the bundled whisper.cpp version (built from the same commit on Linux) and Large v3 Turbo q5_0, exactly the app's arguments, language auto-detected (pt, p = 0.999). 11 minutes on a 2-core cloud machine. The verses come out largely readable, 39 of 557 words flagged as low-confidence. Two problems seen: lines broke mid-phrase because rap has no pauses (fixed: lines now also break where Whisper starts a new phrase), and the last ~25 s became one phrase repeated 25 times, which may be a Whisper repetition loop (waiting for the artist to confirm).
+
+Not yet checked by hand: the installer on a real PC.
 
 ## Known issues / limitations
 
