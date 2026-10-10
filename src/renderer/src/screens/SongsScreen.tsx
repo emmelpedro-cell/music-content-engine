@@ -4,6 +4,7 @@ import type { Project } from '../../../shared/schemas'
 import { api, errorMessage, unwrap } from '../api'
 import type { NoticeState } from '../components/Notice'
 import { formatDateTime, formatRelative } from '../format'
+import { SongWorkspaceView } from '../workspace/SongWorkspaceView'
 
 type Props = {
   projects: Project[] | null
@@ -68,15 +69,23 @@ export function SongsScreen({
 
       <section className="detail-pane">
         {selected ? (
-          <ProjectDetail
+          <SongWorkspaceView
             key={selected.id}
-            project={selected}
-            assets={assets}
-            onOpenLibrary={onOpenLibrary}
-            onChanged={onChanged}
-            onDeleted={() => onSelect(null)}
+            songId={selected.id}
+            revision={`${selected.updatedAt}|${selected.audioAssetId ?? ''}`}
             onNotice={onNotice}
             onError={onError}
+            details={
+              <ProjectDetail
+                project={selected}
+                assets={assets}
+                onOpenLibrary={onOpenLibrary}
+                onChanged={onChanged}
+                onDeleted={() => onSelect(null)}
+                onNotice={onNotice}
+                onError={onError}
+              />
+            }
           />
         ) : (
           projects &&
@@ -159,11 +168,6 @@ function ProjectDetail({
 
   return (
     <div className="detail">
-      <p className="eyebrow">Song project</p>
-      <h2 className="detail-title" data-testid="project-title">
-        {project.title}
-      </h2>
-
       <form className="detail-form" onSubmit={save}>
         <label className="field">
           <span>Title</span>
