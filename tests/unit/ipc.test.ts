@@ -10,6 +10,12 @@ import { ProjectsRepository } from '../../src/main/repositories/projects'
 import { MediaRepository } from '../../src/main/repositories/media'
 import { ImportService } from '../../src/main/media/import-service'
 import { UnavailableError } from '../../src/main/errors'
+import { AnalysisService } from '../../src/main/analysis/service'
+import { AnalysisRepository } from '../../src/main/repositories/analysis'
+import { WorkspaceRepository } from '../../src/main/repositories/workspace'
+import { SpeechModels } from '../../src/main/transcription/models'
+import { TranscriptionService } from '../../src/main/transcription/service'
+import { SongWorkspaceService } from '../../src/main/workspace'
 import { SettingsRepository } from '../../src/main/repositories/settings'
 import { createSenderValidator } from '../../src/main/security'
 import { createNodeSqliteDriver, memoryLogger } from '../helpers/node-sqlite-driver'
@@ -19,8 +25,11 @@ function setup() {
   runMigrations(db)
   const logger = memoryLogger()
   const mediaRepo = new MediaRepository(db)
+  const projects = new ProjectsRepository(db)
+  const workspaceRepo = new WorkspaceRepository(db, logger)
+  const models = new SpeechModels({ directory: '/nonexistent/models', logger, emit: () => {} })
   const table = buildHandlers({
-    projects: new ProjectsRepository(db),
+    projects,
     settings: new SettingsRepository(db, logger),
     logger,
     rendererLogger: logger,
@@ -48,6 +57,45 @@ function setup() {
       relinkWithDialog: async () => ({ status: 'cancelled' }),
       relinkFolderWithDialog: async () => ({ cancelled: true }),
       showInFolder: () => {}
+    },
+    workspace: new SongWorkspaceService({
+      projects,
+      media: mediaRepo,
+      repo: workspaceRepo,
+      analysis: new AnalysisService({
+        repo: new AnalysisRepository(db),
+        media: mediaRepo,
+        getTools: async () => {
+          throw new UnavailableError('FFmpeg is missing.')
+        },
+        runner: async () => {
+          throw new Error('not used')
+        },
+        waveformsDirectory: '/nonexistent/waveforms',
+        logger,
+        emit: () => {}
+      }),
+      transcription: new TranscriptionService({
+        workspace: workspaceRepo,
+        projects,
+        media: mediaRepo,
+        models,
+        getFfmpeg: async () => {
+          throw new UnavailableError('FFmpeg is missing.')
+        },
+        getWhisper: async () => {
+          throw new UnavailableError('The transcriber is missing from this installation.')
+        },
+        tempDirectory: '/nonexistent/temp',
+        logger,
+        emit: () => {}
+      }),
+      logger
+    }),
+    speech: {
+      status: async () => ({ ok: false, code: 'MISSING', message: 'missing', detail: '' }),
+      recheck: async () => ({ ok: false, code: 'MISSING', message: 'missing', detail: '' }),
+      models
     }
   })
   const call = <T>(channel: keyof HandlerTable, input?: unknown) =>
@@ -102,7 +150,15 @@ describe('IPC handlers', () => {
       [IpcChannels.mediaRemove, {}],
       [IpcChannels.mediaShowInFolder, { id: 1 }],
       [IpcChannels.mediaRelink, { id: 'x', path: '/etc/passwd' }],
-      [IpcChannels.projectsSetAudio, { id: '00000000-0000-4000-8000-000000000000', audioAssetId: 'nope' }]
+      [IpcChannels.projectsSetAudio, { id: '00000000-0000-4000-8000-000000000000', audioAssetId: 'nope' }],
+      [IpcChannels.workspaceGet, { songId: 'x' }],
+      [IpcChannels.beatsSetCorrections, { songId: '00000000-0000-4000-8000-000000000000', corrections: { mode: 'grid' } }],
+      [IpcChannels.lyricsSave, { songId: '00000000-0000-4000-8000-000000000000', document: { version: 2, lines: [] }, offsetSeconds: 0, language: null, source: null, confirm: false }],
+      [IpcChannels.lyricsTranscribe, { songId: '00000000-0000-4000-8000-000000000000', model: '../../evil', language: null }],
+      [IpcChannels.lyricsTranscribe, { songId: '00000000-0000-4000-8000-000000000000', model: 'base', language: 'portuguese' }],
+      [IpcChannels.modelsDownload, { id: 'https://evil.example/x.bin' }],
+      [IpcChannels.hooksCreate, { songId: '00000000-0000-4000-8000-000000000000', name: 'x', start: 5, end: 5.1 }],
+      [IpcChannels.hooksDelete, { id: 'nope' }]
     ]
     for (const [channel, input] of cases) {
       const result = await ctx.call(channel, input)
@@ -129,6 +185,30 @@ describe('IPC handlers', () => {
       ok: false,
       error: { code: 'UNAVAILABLE', message: 'FFmpeg is missing from this installation. Reinstall Music Content Engine.' }
     })
+  })
+
+  it('runs the song workspace end to end through IPC', async () => {
+    const created = await ctx.call<{ id: string }>(IpcChannels.projectsCreate, { title: 'Rumelaj' })
+    if (!created.ok) throw new Error('create failed')
+    const songId = created.data.id
+    const ws = await ctx.call<{ audio: unknown; lyrics: { status: string }; hooks: unknown[]; beatMap: unknown }>(IpcChannels.workspaceGet, { songId })
+    expect(ws.ok && ws.data).toMatchObject({ audio: null, beatMap: null, hooks: [], lyrics: { status: 'empty' } })
+
+    const hook = await ctx.call<{ id: string }>(IpcChannels.hooksCreate, { songId, name: 'Chorus', start: 12, end: 27, tags: ['erhu'] })
+    expect(hook.ok).toBe(true)
+    const saved = await ctx.call<{ status: string }>(IpcChannels.lyricsSave, {
+      songId,
+      document: { version: 1, lines: [{ id: 'l1', kind: 'lyric', words: [{ id: 'w1', text: 'Rumelaj', start: 1, end: 1.5 }] }] },
+      offsetSeconds: 0,
+      language: 'pt',
+      source: 'manual',
+      confirm: true
+    })
+    expect(saved.ok && saved.data.status).toBe('confirmed')
+    const transcribe = await ctx.call(IpcChannels.lyricsTranscribe, { songId, model: 'base', language: null })
+    expect(!transcribe.ok && transcribe.error.code).toBe('UNPROCESSABLE')
+    const models = await ctx.call<{ id: string }[]>(IpcChannels.modelsList)
+    expect(models.ok && models.data.length).toBe(5)
   })
 
   it('lists an empty media library and idle queue', async () => {

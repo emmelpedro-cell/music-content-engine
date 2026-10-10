@@ -19,26 +19,10 @@
  *   node scripts/fetch-ffmpeg.mjs --target win32-x64 --strict
  *   node scripts/fetch-ffmpeg.mjs --force         re-install even if up to date
  */
-import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
-import {
-  copyFileSync,
-  createReadStream,
-  createWriteStream,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync
-} from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
+import { extract, fetchVerified, makeFail } from './lib/fetch-utils.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const sources = JSON.parse(readFileSync(join(root, 'scripts', 'ffmpeg-sources.json'), 'utf8'))
@@ -60,67 +44,14 @@ function log(message) {
   console.log(`[fetch-ffmpeg] ${message}`)
 }
 
-function fail(message) {
-  if (strict) {
-    console.error(`[fetch-ffmpeg] ERROR: ${message}`)
-    process.exit(1)
-  }
-  console.warn(`[fetch-ffmpeg] WARNING: ${message}`)
-  console.warn('[fetch-ffmpeg] The app will start, but media import stays disabled until FFmpeg is installed.')
-  console.warn('[fetch-ffmpeg] Retry with: npm run fetch:ffmpeg')
-  process.exit(0)
-}
+const fail = makeFail(
+  'fetch-ffmpeg',
+  strict,
+  'The app will start, but media import stays disabled until FFmpeg is installed. Retry with: npm run fetch:ffmpeg'
+)
 
-async function sha256OfFile(path) {
-  const hash = createHash('sha256')
-  await pipeline(createReadStream(path), hash)
-  return hash.digest('hex')
-}
 
-async function download(url, outFile, expectedSize) {
-  const response = await fetch(url, { redirect: 'follow' })
-  if (!response.ok || !response.body) throw new Error(`HTTP ${response.status} for ${url}`)
-  const total = Number(response.headers.get('content-length')) || expectedSize
-  let received = 0
-  let nextReport = 0.1
-  const counter = new TransformStream({
-    transform(chunk, controller) {
-      received += chunk.byteLength
-      if (total && received / total >= nextReport) {
-        log(`  ${Math.round((received / total) * 100)}%`)
-        nextReport += 0.1
-      }
-      controller.enqueue(chunk)
-    }
-  })
-  const tmp = `${outFile}.part`
-  await pipeline(Readable.fromWeb(response.body.pipeThrough(counter)), createWriteStream(tmp))
-  renameSync(tmp, outFile)
-}
 
-function extract(archive, into) {
-  mkdirSync(into, { recursive: true })
-  const isZip = archive.endsWith('.zip')
-  // On Windows use the system bsdtar explicitly: it reads zip files, while a GNU tar
-  // from Git for Windows that may come first on PATH cannot.
-  // Elsewhere, GNU tar handles .tar.xz and unzip handles .zip (cross-platform fetches).
-  let command
-  let commandArgs
-  if (process.platform === 'win32') {
-    command = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
-    commandArgs = [isZip ? '-xf' : '-xJf', archive, '-C', into]
-  } else if (isZip) {
-    command = 'unzip'
-    commandArgs = ['-q', archive, '-d', into]
-  } else {
-    command = 'tar'
-    commandArgs = ['-xJf', archive, '-C', into]
-  }
-  const result = spawnSync(command, commandArgs, { stdio: 'inherit' })
-  if (result.status !== 0) {
-    throw new Error(`Extracting ${archive} failed (${result.error?.message ?? `exit code ${result.status}`})`)
-  }
-}
 
 function writeNotice(dir, spec) {
   const notice = `FFmpeg ${sources.ffmpegVersion} (${sources.describe}) — bundled with Music Content Engine
@@ -183,31 +114,20 @@ async function main() {
     }
   }
 
-  mkdirSync(cacheDir, { recursive: true })
-  const archive = join(cacheDir, spec.asset)
-
-  if (existsSync(archive) && (await sha256OfFile(archive)) !== spec.sha256) {
-    log('Cached archive does not match the pinned checksum; downloading again.')
-    rmSync(archive)
-  }
-  if (!existsSync(archive)) {
-    const url = `${sources.baseUrl}/${spec.asset}`
-    log(`Downloading ${spec.asset} (${Math.round(spec.size / 1048576)} MB)`)
-    try {
-      await download(url, archive, spec.size)
-    } catch (error) {
-      fail(`Download failed: ${error.cause?.message ?? error.message}`)
-      return
-    }
-  }
-
-  const actual = await sha256OfFile(archive)
-  if (actual !== spec.sha256) {
-    rmSync(archive, { force: true })
-    fail(`Checksum mismatch for ${spec.asset}: expected ${spec.sha256}, got ${actual}. The file was deleted.`)
+  let archive
+  try {
+    archive = await fetchVerified({
+      url: `${sources.baseUrl}/${spec.asset}`,
+      file: spec.asset,
+      sha256: spec.sha256,
+      size: spec.size,
+      cacheDir,
+      log
+    })
+  } catch (error) {
+    fail(error.cause?.message ?? error.message)
     return
   }
-  log('Checksum verified.')
 
   const work = join(vendorDir, `.extract-${target}`)
   const staging = join(vendorDir, `.staging-${target}`)

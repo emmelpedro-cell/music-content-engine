@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { MceApi } from '../shared/api'
 import { IpcChannels, IpcEvents, type IpcChannel } from '../shared/channels'
 import type { MediaEvent } from '../shared/media'
+import type { WorkspaceEvent } from '../shared/workspace'
 import type { IpcResult } from '../shared/schemas'
 
 /**
@@ -61,6 +62,33 @@ const api: MceApi = {
         ipcRenderer.removeListener(IpcEvents.media, handler)
       }
     }
+  },
+  workspace: {
+    get: (songId) => call(IpcChannels.workspaceGet, { songId }),
+    waveform: (assetId) => call(IpcChannels.workspaceWaveform, { assetId }),
+    reanalyze: (songId) => call(IpcChannels.analysisReanalyze, { songId }),
+    setCorrections: (songId, corrections) => call(IpcChannels.beatsSetCorrections, { songId, corrections }),
+    saveLyrics: (input) => call(IpcChannels.lyricsSave, input),
+    transcribe: (input) => call(IpcChannels.lyricsTranscribe, input),
+    cancelTranscription: (songId) => call(IpcChannels.lyricsCancelTranscription, { songId }),
+    createHook: (input) => call(IpcChannels.hooksCreate, input),
+    updateHook: (input) => call(IpcChannels.hooksUpdate, input),
+    deleteHook: (id) => call(IpcChannels.hooksDelete, { id }),
+    onEvent: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: WorkspaceEvent) => listener(payload)
+      ipcRenderer.on(IpcEvents.workspace, handler)
+      return () => {
+        ipcRenderer.removeListener(IpcEvents.workspace, handler)
+      }
+    }
+  },
+  speech: {
+    status: () => call(IpcChannels.speechStatus),
+    recheck: () => call(IpcChannels.speechRecheck),
+    models: () => call(IpcChannels.modelsList),
+    downloadModel: (id) => call(IpcChannels.modelsDownload, { id }),
+    cancelDownload: (id) => call(IpcChannels.modelsCancel, { id }),
+    deleteModel: (id) => call(IpcChannels.modelsDelete, { id })
   },
   settings: {
     get: () => call(IpcChannels.settingsGet),

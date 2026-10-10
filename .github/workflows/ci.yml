@@ -29,6 +29,15 @@ jobs:
           path: vendor/ffmpeg/.cache
           key: ffmpeg-${{ hashFiles('scripts/ffmpeg-sources.json') }}
 
+      # Speech model used by the transcription tests (pinned SHA-256; ~148 MB).
+      - name: Cache whisper downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/whisper/.cache
+            vendor/whisper-models
+          key: whisper-${{ hashFiles('scripts/whisper-sources.json') }}
+
       # No lockfile yet: the first green run tells us the versions resolve together.
       # After that, commit package-lock.json and switch this to `npm ci`.
       - name: Install dependencies (rebuilds better-sqlite3 for Electron, installs FFmpeg)
@@ -37,10 +46,13 @@ jobs:
       - name: Verify bundled FFmpeg (strict)
         run: scripts/ci-step.sh "FFmpeg" npm run fetch:ffmpeg
 
+      - name: Verify bundled whisper.cpp and fetch the test model (strict)
+        run: scripts/ci-step.sh "whisper.cpp" node scripts/fetch-whisper.mjs --strict --model base
+
       - name: Type check
         run: scripts/ci-step.sh "Type check" npm run typecheck
 
-      - name: Unit tests (real FFmpeg)
+      - name: Unit tests (real FFmpeg, real whisper.cpp)
         run: npm test
 
       - name: E2E — build and drive the real Electron app
@@ -51,7 +63,7 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Packaged app — bundled FFmpeg found and working
+      - name: Packaged app — bundled FFmpeg and whisper.cpp found and working
         run: npm run test:packaged
 
       - name: Upload installer
