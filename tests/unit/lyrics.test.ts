@@ -138,6 +138,32 @@ describe('alignToTimings', () => {
     expect(doc.lines[0]!.words.map((w) => w.start)).toEqual([1, 1.2, 1.6])
   })
 
+  it('aligns romanised lyrics with a transcription in another script, by sound', () => {
+    // Real case: Nepali rap typed in Latin letters; Whisper wrote Devanagari.
+    const words = [
+      ['सत्तेको', 33.1, 33.8],
+      ['खोजिको,', 33.8, 34.5],
+      ['संगर', 34.5, 35],
+      ['से', 35, 35.3],
+      ['जारिछ,', 35.3, 36],
+      ['सब्दागो', 36, 37],
+      ['खेल्च,', 37, 37.4],
+      ['सब्दाले', 37.4, 37.9],
+      ['पेल्च,', 37.9, 38.4]
+    ] as const
+    const transcript: LyricDocument = {
+      version: 1,
+      lines: [{ id: 'x', kind: 'lyric', words: words.map(([text, start, end], i) => ({ id: `w${i}`, text, start, end })) }]
+    }
+    const doc = alignToTimings('Satya ko khoji ko sangarsa jari cha\nSabda ko khelcha sabda le pelcha', transcript)
+    const [l1, l2] = doc.lines
+    expect(l1!.words[0]!.start).toBe(33.1) // Satya = सत्तेको
+    expect(l1!.words.find((w) => w.text === 'jari')!.start).toBe(35.3)
+    expect(l2!.words[0]!.start).toBe(36) // Sabda = सब्दागो
+    expect(l2!.words.find((w) => w.text === 'pelcha')!.start).toBe(37.9)
+    expect(doc.lines.flatMap((l) => l.words).every((w) => w.start !== null)).toBe(true)
+  })
+
   it('leaves text untimed when there is nothing to align with', () => {
     const doc = alignToTimings('only text', { version: 1, lines: [] })
     expect(doc.lines[0]!.words.every((w) => w.start === null)).toBe(true)

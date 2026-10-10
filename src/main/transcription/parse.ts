@@ -76,7 +76,13 @@ export function transcriptToDocument(output: WhisperOutput, options: TranscriptT
     if (current.length) lines.push({ id: newId('l'), kind: 'lyric', words: current })
     current = []
   }
-  for (const word of words) {
+  for (const item of collapseWordLoops(words)) {
+    if ('marker' in item) {
+      flush()
+      lines.push(item.marker)
+      continue
+    }
+    const word = item
     const prev = current[current.length - 1]
     const newPhrase = current.length >= 2 && PHRASE_START.test(word.text) && !ENGLISH_I.test(word.text)
     if (prev && ((word.start ?? 0) - (prev.end ?? 0) > pause || SENTENCE_END.test(prev.text) || newPhrase || current.length >= maxWords)) flush()
@@ -116,6 +122,38 @@ export function collapseRepetitionLoops(lines: LyricLine[]): LyricLine[] {
       out.push(...lines.slice(i, j))
     }
     i = j
+  }
+  return out
+}
+
+/**
+ * The same kind of loop inside a line: one word or a short group of words repeated many
+ * times in a row ("falana falana falana …"). Keeps two repetitions and replaces the rest
+ * with a marked section.
+ */
+function collapseWordLoops(words: LyricWord[]): (LyricWord | { marker: LyricLine })[] {
+  const key = (w: LyricWord) => w.text.toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '')
+  const out: (LyricWord | { marker: LyricLine })[] = []
+  let i = 0
+  while (i < words.length) {
+    let collapsed = false
+    for (let n = 1; n <= 4 && !collapsed; n++) {
+      if (i + n > words.length) break
+      const unit = words.slice(i, i + n).map(key)
+      if (unit.some((k) => !k)) continue
+      let reps = 1
+      while (i + (reps + 1) * n <= words.length && words.slice(i + reps * n, i + (reps + 1) * n).every((w, x) => key(w) === unit[x])) reps++
+      if (reps >= LOOP_MIN_REPEATS) {
+        out.push(...words.slice(i, i + 2 * n))
+        const removed = words.slice(i + 2 * n, i + reps * n)
+        const start = removed[0]!.start
+        const end = removed[removed.length - 1]!.end
+        out.push({ marker: { id: newId('l'), kind: 'instrumental', words: [], label: LOOP_LABEL, start, end } })
+        i += reps * n
+        collapsed = true
+      }
+    }
+    if (!collapsed) out.push(words[i++]!)
   }
   return out
 }

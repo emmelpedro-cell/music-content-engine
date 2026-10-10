@@ -82,6 +82,15 @@ describe('whisper output', () => {
     expect(doc.lines[3]).toMatchObject({ kind: 'instrumental', start: 4, end: 27 })
   })
 
+  it('collapses one word repeated in a loop inside a line', () => {
+    // Real case (Nepali): "फालाना थालाना थालाना थालाना …" twenty times in a row.
+    const segments = [segment(' फालाना', 0, 500)]
+    for (let r = 0; r < 20; r++) segments.push(segment(' थालाना', 500 + r * 100, 600 + r * 100))
+    segments.push(segment(' अच्छ', 3000, 3400))
+    const doc = transcriptToDocument(parseWhisperJson(JSON.stringify({ transcription: segments })))
+    expect(doc.lines.map(lineText)).toEqual(['फालाना थालाना थालाना', `[${LOOP_LABEL}]`, 'अच्छ'])
+  })
+
   it('keeps a line repeated a few times, like a real chorus', () => {
     const phrase = 'Tipo quando ela rebola'.split(' ')
     const segments: ReturnType<typeof segment>[] = []

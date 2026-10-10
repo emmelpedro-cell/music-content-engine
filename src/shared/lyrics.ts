@@ -1,3 +1,4 @@
+import { phoneticKey } from './phonetic'
 import { z } from 'zod'
 
 /* ------------------------------------------------------------------ */
@@ -300,7 +301,7 @@ export function alignToTimings(text: string, timed: LyricDocument): LyricDocumen
     }
   }
   // Backtrack: pair words matched (exactly or similar) with source timings.
-  const timing = new Map<number, LyricWord>()
+  let timing = new Map<number, Timing>()
   let i = n
   let j = m
   while (i > 0 && j > 0) {
@@ -312,6 +313,13 @@ export function alignToTimings(text: string, timed: LyricDocument): LyricDocumen
       j--
     } else if (here === cost[idx(i - 1, j)]! + 1) i--
     else j--
+  }
+
+  // Few words in common (the transcription is in another script, or badly misheard, e.g.
+  // Nepali rap typed in Latin letters vs. Whisper's Devanagari): match by sound instead.
+  if (timing.size < words.length * PHONETIC_FALLBACK_BELOW) {
+    const phonetic = alignPhonetic(words, source)
+    if (phonetic.size > timing.size) timing = phonetic
   }
 
   let k = 0
@@ -338,6 +346,72 @@ export function alignToTimings(text: string, timed: LyricDocument): LyricDocumen
   }
   fillLineEdges(lines)
   return { version: 1, lines }
+}
+
+type Timing = { start: number | null; end: number | null; confidence?: number | null }
+
+/** Below this share of words matched by spelling, also try matching by sound. */
+const PHONETIC_FALLBACK_BELOW = 0.5
+
+/**
+ * Word-level alignment by sound (see phonetic.ts): two words match when their consonant
+ * skeletons are close. Works across scripts; short words that sound alike are common, so
+ * a match only counts when the skeletons are long enough to mean something.
+ */
+function alignPhonetic(words: LyricWord[], source: LyricWord[]): Map<number, Timing> {
+  const a = words.map((w) => phoneticKey(w.text))
+  const b = source.map((w) => phoneticKey(w.text))
+  const n = a.length
+  const m = b.length
+  const result = new Map<number, Timing>()
+  if (!n || !m) return result
+  const distance = (x: string, y: string) => {
+    if (!x || !y) return 1
+    const dp = Array.from({ length: y.length + 1 }, (_, j) => j)
+    for (let i = 1; i <= x.length; i++) {
+      let prev = dp[0]!
+      dp[0] = i
+      for (let j = 1; j <= y.length; j++) {
+        const tmp = dp[j]!
+        dp[j] = Math.min(dp[j]! + 1, dp[j - 1]! + 1, prev + (x[i - 1] === y[j - 1] ? 0 : 1))
+        prev = tmp
+      }
+    }
+    return dp[y.length]! / Math.max(x.length, y.length)
+  }
+  // A word pair counts as the same word when at most a third of the sounds differ and
+  // there are at least two sounds to compare.
+  const same = (x: string, y: string) => Math.min(x.length, y.length) >= 2 && distance(x, y) <= 1 / 3
+  const SKIP_TARGET = 1
+  const SKIP_SOURCE = 0.5
+  const cost = new Float32Array((n + 1) * (m + 1))
+  const idx = (i: number, j: number) => i * (m + 1) + j
+  for (let i = 1; i <= n; i++) cost[idx(i, 0)] = i * SKIP_TARGET
+  // Free to skip transcription before and after the lyrics (intro, outro, partial lyrics).
+  for (let j = 1; j <= m; j++) cost[idx(0, j)] = 0
+  const matchCost = (i: number, j: number) => (same(a[i]!, b[j]!) ? 0 : 2)
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      cost[idx(i, j)] = Math.min(
+        cost[idx(i - 1, j - 1)]! + matchCost(i - 1, j - 1),
+        cost[idx(i - 1, j)]! + SKIP_TARGET,
+        cost[idx(i, j - 1)]! + SKIP_SOURCE
+      )
+    }
+  }
+  let i = n
+  let j = 0
+  for (let jj = 0; jj <= m; jj++) if (cost[idx(n, jj)]! < cost[idx(n, j)]! || (cost[idx(n, jj)] === cost[idx(n, j)] && jj > j)) j = jj
+  while (i > 0 && j > 0) {
+    const here = cost[idx(i, j)]!
+    if (here === cost[idx(i - 1, j - 1)]! + matchCost(i - 1, j - 1)) {
+      if (matchCost(i - 1, j - 1) === 0) result.set(i - 1, { start: source[j - 1]!.start, end: source[j - 1]!.end, confidence: null })
+      i--
+      j--
+    } else if (here === cost[idx(i - 1, j)]! + SKIP_TARGET) i--
+    else j--
+  }
+  return result
 }
 
 /** Typical length of one sung word, used to place unmatched words at the edges of a line. */
