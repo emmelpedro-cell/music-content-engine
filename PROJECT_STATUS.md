@@ -25,7 +25,21 @@ Acceptance criterion: _the user can verify lyrics and inspect beat markers again
 
 ### Verification
 
-VERIFICATION_PLACEHOLDER
+**Phase 2 verified on Windows** (GitHub Actions `windows-latest`, run 38051706356, 2026-10-10). Every step passed: install, strict FFmpeg and whisper.cpp verification, type check, unit tests, E2E, installer build, packaged-app test.
+
+- **Unit tests: 185 passed, 6 skipped.** The skips are the symlink test and the five transcription-service tests that use a fake shell-script transcriber (non-Windows only); on Windows the real whisper.cpp runs instead.
+  - Beat analysis on synthetic music with known beats: 75–174 BPM at various offsets, human timing jitter, tempo ramps, 3/4 time, half/double alternatives, and silence, noise and pads that must report "no clear beat".
+  - Correction layer (`resolveBeatMap`), lyrics parsing/alignment, lyric edit operations, whisper JSON parsing, model download verification (checksum, cancel, `.part` cleanup), repositories, migration v3, the analysis service with real FFmpeg decoding.
+  - **Real transcription**: the bundled whisper.cpp with the base model transcribes Windows text-to-speech audio and returns timed words.
+- **Electron E2E (built app): 9 passed**, including Phase 2 acceptance through the real UI:
+  - a 128 BPM song is analysed in the worker thread; the Beats tab shows 128 ± 1 BPM and the timeline's waveform band is painted
+  - clicking the timeline moves the playhead; "Double time" gives a corrected 256 BPM
+  - lyrics are pasted (draft), then marked as checked; a hook is created from the playhead
+  - after a restart: the correction, the checked lyrics and the hook are still there; **Analyse again** keeps the correction
+  - a spoken WAV is transcribed with the base model: the words (including "fox") appear, all timed, and the lyrics stay a **draft**
+- **Packaged app (`dist/win-unpacked`): 4 passed.** `resources/whisper` contains exactly `bin/{whisper-cli.exe, whisper.dll, ggml.dll, ggml-base.dll, ggml-cpu.dll}`, the two license files, NOTICE.txt and manifest.json (no demo tools, no SDL2, no models). The installed app finds and verifies whisper.cpp from `resources/whisper` and analyses a song in its worker (120 BPM found).
+
+Not yet checked by hand: the installer on a real PC, and transcription of real sung music (only speech is tested automatically).
 
 ## Known issues / limitations
 

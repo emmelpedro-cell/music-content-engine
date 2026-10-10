@@ -60,7 +60,7 @@ export function Sidebar({ current, onNavigate, version }: Props) {
         >
           Settings
         </button>
-        <p className="build-tag">Phase 2 · analysis{version ? ` · v${version}` : ''}</p>
+        <p className="build-tag">Phase 2{version ? ` · v${version}` : ''}</p>
       </div>
     </nav>
   )
