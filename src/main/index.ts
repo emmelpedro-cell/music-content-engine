@@ -3,6 +3,15 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { IpcEvents } from '../shared/channels'
 import type { MediaEvent } from '../shared/media'
+import type { WorkspaceEvent } from '../shared/workspace'
+import { workerRunner } from './analysis/run-in-worker'
+import { AnalysisService } from './analysis/service'
+import { AnalysisRepository } from './repositories/analysis'
+import { WorkspaceRepository } from './repositories/workspace'
+import { SpeechModels } from './transcription/models'
+import { TranscriptionService } from './transcription/service'
+import { resolveWhisper, WhisperManager } from './transcription/whisper-binary'
+import { SongWorkspaceService } from './workspace'
 import type { SqlDriver } from './db/driver'
 import { createBetterSqliteDriver } from './db/better-sqlite3-driver'
 import { openDatabase } from './db/open'
@@ -34,6 +43,7 @@ let mainWindow: BrowserWindow | null = null
 let db: SqlDriver | null = null
 let logger: Logger | null = null
 let importService: ImportService | null = null
+const shutdownHooks: (() => void)[] = []
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -100,6 +110,59 @@ function start(): void {
     emit: sendMediaEvent
   })
   importService = service
+
+  // ---- Phase 2: analysis, transcription, workspace -----------------------
+  const workspaceRepo = new WorkspaceRepository(opened.db, log.child('workspace'))
+  const analysis = new AnalysisService({
+    repo: new AnalysisRepository(opened.db),
+    media: mediaRepo,
+    getTools: () => tools.require(),
+    runner: workerRunner(join(__dirname, 'analysis-worker.js')),
+    waveformsDirectory: layout.waveforms,
+    logger: log.child('analysis'),
+    emit: sendWorkspaceEvent
+  })
+  const whisper = new WhisperManager(
+    resolveWhisper({
+      isPackaged: app.isPackaged,
+      appPath: app.getAppPath(),
+      resourcesPath: process.resourcesPath,
+      platform: process.platform,
+      arch: process.arch,
+      env: process.env
+    }),
+    log.child('whisper')
+  )
+  void whisper.status()
+  const models = new SpeechModels({
+    directory: layout.models,
+    logger: log.child('models'),
+    emit: (list) => sendWorkspaceEvent({ type: 'models', models: list })
+  })
+  const transcription = new TranscriptionService({
+    workspace: workspaceRepo,
+    projects,
+    media: mediaRepo,
+    models,
+    getFfmpeg: () => tools.require(),
+    getWhisper: () => whisper.require(),
+    tempDirectory: layout.temp,
+    logger: log.child('transcription'),
+    emit: sendWorkspaceEvent
+  })
+  const workspace = new SongWorkspaceService({
+    projects,
+    media: mediaRepo,
+    repo: workspaceRepo,
+    analysis,
+    transcription,
+    logger: log.child('workspace')
+  })
+  shutdownHooks.push(
+    () => analysis.shutdown(),
+    () => transcription.shutdown(),
+    () => models.cancelAll()
+  )
 
   protocol.handle(MEDIA_SCHEME, (request) =>
     handleMediaRequest(request, { repo: mediaRepo, thumbnailsDirectory: layout.thumbnails })
@@ -173,6 +236,12 @@ function start(): void {
           throw new NotFoundError(`Neither “${asset.fileName}” nor its folder exists anymore. Use Relink to locate it.`)
         }
       }
+    },
+    workspace,
+    speech: {
+      status: () => whisper.status(),
+      recheck: () => whisper.recheck(),
+      models
     }
   })
 
@@ -185,6 +254,8 @@ function start(): void {
 
   createWindow()
   service.start()
+  analysis.start()
+  transcription.start()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -238,6 +309,10 @@ async function pickFolder(title: string): Promise<string | null> {
 
 function sendMediaEvent(event: MediaEvent): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IpcEvents.media, event)
+}
+
+function sendWorkspaceEvent(event: WorkspaceEvent): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IpcEvents.workspace, event)
 }
 
 let lastAvailabilityCheck = 0
@@ -321,6 +396,7 @@ app.on('will-quit', () => {
   try {
     // Stop FFmpeg child processes; unfinished imports resume on the next start.
     importService?.shutdown()
+    for (const stop of shutdownHooks) stop()
     db?.close()
     logger?.info('App closed')
   } catch (error) {

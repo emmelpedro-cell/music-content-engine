@@ -1,0 +1,226 @@
+import { describe, expect, it } from 'vitest'
+import {
+  LyricDocumentSchema,
+  alignToTimings,
+  detectFormat,
+  documentStats,
+  interpolateLine,
+  lineRange,
+  lineText,
+  lyricsInRange,
+  parseLyrics,
+  parseTimestamp,
+  type LyricDocument
+} from '../../src/shared/lyrics'
+
+const texts = (doc: LyricDocument) => doc.lines.map(lineText)
+
+describe('parseTimestamp', () => {
+  it('parses SRT, VTT and LRC times', () => {
+    expect(parseTimestamp('00:01:02,345')).toBeCloseTo(62.345)
+    expect(parseTimestamp('01:02.5')).toBeCloseTo(62.5)
+    expect(parseTimestamp('1:02:03.004')).toBeCloseTo(3723.004)
+    expect(parseTimestamp('nope')).toBeNull()
+  })
+})
+
+describe('parseLyrics', () => {
+  it('reads plain text, with instrumental markers', () => {
+    const doc = parseLyrics('﻿Rumelaj, rumelaj\r\n\r\n[Instrumental]\nOutra linha aqui\n(solo)\n', 'txt')
+    expect(texts(doc)).toEqual(['Rumelaj, rumelaj', '[Instrumental]', 'Outra linha aqui', '[solo]'])
+    expect(doc.lines[1]!.kind).toBe('instrumental')
+    expect(documentStats(doc)).toEqual({ lines: 2, words: 5, timed: 0 })
+    expect(LyricDocumentSchema.safeParse(doc).success).toBe(true)
+  })
+
+  it('reads SRT and spreads words across each cue', () => {
+    const srt = `1\n00:00:01,000 --> 00:00:03,000\nfirst line here\n\n2\n00:00:04,500 --> 00:00:05,500\n<i>second</i> line\n`
+    const doc = parseLyrics(srt, 'srt')
+    expect(texts(doc)).toEqual(['first line here', 'second line'])
+    const w = doc.lines[0]!.words
+    expect(w[0]!.start).toBe(1)
+    expect(w[1]!.start).toBeCloseTo(1.667, 2)
+    expect(w[2]!.end).toBe(3)
+    expect(lineRange(doc.lines[1]!)).toEqual({ start: 4.5, end: 5.5 })
+  })
+
+  it('reads WebVTT', () => {
+    const vtt = `WEBVTT\n\n00:00.500 --> 00:02.000 align:start\nhello world\n`
+    const doc = parseLyrics(vtt, 'vtt')
+    expect(texts(doc)).toEqual(['hello world'])
+    expect(doc.lines[0]!.words[0]!.start).toBe(0.5)
+  })
+
+  it('reads LRC line timing and enhanced word timing', () => {
+    const lrc = `[ar:Luneta]\n[00:12.00]line one goes\n[00:15.50]<00:15.50>word <00:16.00>by <00:16.40>word\n[00:20.00]\n`
+    const doc = parseLyrics(lrc, 'lrc')
+    expect(texts(doc)).toEqual(['line one goes', 'word by word'])
+    expect(doc.lines[0]!.words[0]!.start).toBe(12)
+    expect(doc.lines[1]!.words.map((w) => w.start)).toEqual([15.5, 16, 16.4])
+    expect(doc.lines[1]!.words[2]!.end).toBe(20)
+  })
+
+  it('detects the format from name or content', () => {
+    expect(detectFormat('song.lrc', '')).toBe('lrc')
+    expect(detectFormat('x.txt', 'WEBVTT\n')).toBe('vtt')
+    expect(detectFormat('x', '[00:01.00] hi')).toBe('lrc')
+    expect(detectFormat('x', '1\n00:00:01,000 --> 00:00:02,000\nhi')).toBe('srt')
+    expect(detectFormat('notes', 'just words')).toBe('txt')
+  })
+})
+
+describe('alignToTimings', () => {
+  const transcript: LyricDocument = {
+    version: 1,
+    lines: [
+      {
+        id: 'l1',
+        kind: 'lyric',
+        words: [
+          { id: 'a', text: 'Rumelai', start: 10, end: 10.5, confidence: 0.4 },
+          { id: 'b', text: 'come', start: 10.6, end: 10.9 },
+          { id: 'c', text: 'dance', start: 11, end: 11.4 },
+          { id: 'd', text: 'with', start: 11.5, end: 11.7 },
+          { id: 'e', text: 'me', start: 11.8, end: 12.2 },
+          { id: 'f', text: 'tonight', start: 13, end: 13.6 }
+        ]
+      }
+    ]
+  }
+
+  it('moves timings from a transcription onto corrected text', () => {
+    const doc = alignToTimings('Rumelaj, come and dance with me\nTonight!', transcript)
+    expect(texts(doc)).toEqual(['Rumelaj, come and dance with me', 'Tonight!'])
+    const [w0, w1, w2, w3] = doc.lines[0]!.words
+    expect(w0!.start).toBe(10) // "Rumelaj," matched "Rumelai" (similar)
+    expect(w1!.start).toBe(10.6)
+    expect(w3!.start).toBe(11) // "dance"
+    // "and" wasn't in the transcription: placed between its neighbours.
+    expect(w2!.start).toBeGreaterThan(10.6)
+    expect(w2!.start).toBeLessThan(11)
+    expect(doc.lines[1]!.words[0]!.start).toBe(13)
+  })
+
+  it('times unmatched words at the start or end of a line next to its matched words', () => {
+    // Real case: Whisper heard "Trilhinho" where the singer sang "Treinei de fininho".
+    const doc = alignToTimings('Treinei de fininho dance with me\nTonight oh yeah', transcript)
+    const [l1, l2] = doc.lines
+    expect(doc.lines.flatMap((l) => l.words).every((w) => w.start !== null)).toBe(true)
+    // Leading words sit just before "dance" (11 s), at most ~0.35 s each, after time 0.
+    const lead = l1!.words.slice(0, 3).map((w) => w.start!)
+    expect(lead[0]).toBeGreaterThanOrEqual(11 - 3 * 0.35 - 1e-9)
+    expect(lead[2]).toBeLessThan(11)
+    expect([...lead].sort((x, y) => x - y)).toEqual(lead)
+    // Trailing words follow "Tonight" (13 s) in order.
+    const tail = l2!.words.map((w) => w.start!)
+    expect(tail[0]).toBe(13)
+    expect(tail[1]).toBeGreaterThan(13)
+    expect(tail[2]).toBeGreaterThan(tail[1]!)
+  })
+
+  it('aligns lyrics in scripts with vowel signs (Nepali, Devanagari)', () => {
+    const nepali: LyricDocument = {
+      version: 1,
+      lines: [
+        {
+          id: 'n',
+          kind: 'lyric',
+          words: [
+            { id: '1', text: 'म', start: 1, end: 1.2 },
+            { id: '2', text: 'गीत', start: 1.2, end: 1.6 },
+            { id: '3', text: 'गाउँछु', start: 1.6, end: 2.2 }
+          ]
+        }
+      ]
+    }
+    // Vowel signs (matras) are combining marks; they must survive normalisation.
+    const doc = alignToTimings('म गीत गाउँछु', nepali)
+    expect(doc.lines[0]!.words.map((w) => w.start)).toEqual([1, 1.2, 1.6])
+  })
+
+  it('aligns romanised lyrics with a transcription in another script, by sound', () => {
+    // Real case: Nepali rap typed in Latin letters; Whisper wrote Devanagari.
+    const words = [
+      ['सत्तेको', 33.1, 33.8],
+      ['खोजिको,', 33.8, 34.5],
+      ['संगर', 34.5, 35],
+      ['से', 35, 35.3],
+      ['जारिछ,', 35.3, 36],
+      ['सब्दागो', 36, 37],
+      ['खेल्च,', 37, 37.4],
+      ['सब्दाले', 37.4, 37.9],
+      ['पेल्च,', 37.9, 38.4]
+    ] as const
+    const transcript: LyricDocument = {
+      version: 1,
+      lines: [{ id: 'x', kind: 'lyric', words: words.map(([text, start, end], i) => ({ id: `w${i}`, text, start, end })) }]
+    }
+    const doc = alignToTimings('Satya ko khoji ko sangarsa jari cha\nSabda ko khelcha sabda le pelcha', transcript)
+    const [l1, l2] = doc.lines
+    expect(l1!.words[0]!.start).toBe(33.1) // Satya = सत्तेको
+    expect(l1!.words.find((w) => w.text === 'jari')!.start).toBe(35.3)
+    expect(l2!.words[0]!.start).toBe(36) // Sabda = सब्दागो
+    expect(l2!.words.find((w) => w.text === 'pelcha')!.start).toBe(37.9)
+    expect(doc.lines.flatMap((l) => l.words).every((w) => w.start !== null)).toBe(true)
+  })
+
+  it('combines several transcriptions, keeping matches in time order', () => {
+    // Real case: a Nepali/English rap transcribed twice (Nepali mode heard the Nepali verse,
+    // Hindi mode heard the English verse); one run also misplaced a copy of the first line.
+    const doc = (words: [string, number][]): LyricDocument => ({
+      version: 1,
+      lines: [{ id: 'l', kind: 'lyric', words: words.map(([text, start], i) => ({ id: `w${i}`, text, start, end: start + 0.4 })) }]
+    })
+    const nepali = doc([['जिवन', 30], ['छ', 30.5], ['भारी', 31], ['यो', 31.5]])
+    const hindi = doc([['जिवन', 19], ['never', 40], ['on', 40.5], ['the', 41], ['bench', 41.5]])
+    const aligned = alignToTimings('Jiwan cha vari yo\nNever on the bench', [nepali, hindi])
+    expect(aligned.lines[0]!.words[0]!.start).toBe(30)
+    expect(aligned.lines[1]!.words.map((w) => w.start)).toEqual([40, 40.5, 41, 41.5])
+  })
+
+  it('drops a wrong match that would make the singing impossibly fast, and fills the gap', () => {
+    // Real case: one line matched 5 s too late, squeezing the next lines into one second.
+    const t = (text: string, start: number) => ({ id: text, text, start, end: start + 0.3 })
+    const transcript: LyricDocument = {
+      version: 1,
+      lines: [{ id: 'l', kind: 'lyric', words: [t('groove', 52), t('feri', 59.9), t('jaam', 60.2), t('mero', 61.1)] }]
+    }
+    const lyrics = 'Gardai chu groove\nVandai chan feri\nChaina re cool\nTesaile prove gardai chu mera yi sabda\nGardaichan nanga naach\nChakka jaam\nGame mero'
+    const doc = alignToTimings(lyrics, transcript)
+    const starts = doc.lines.map((l) => l.words[0]!.start!)
+    expect(doc.lines.flatMap((l) => l.words).every((w) => w.start !== null)).toBe(true)
+    // "Vandai chan feri" now follows "groove" instead of jumping to 59.9 s.
+    expect(starts[1]).toBeLessThan(55)
+    // No stretch faster than 8 words per second.
+    const all = doc.lines.flatMap((l) => l.words.map((w) => w.start!))
+    for (let i = 0; i + 8 < all.length; i++) expect(all[i + 8]! - all[i]!).toBeGreaterThanOrEqual(0.99)
+  })
+
+  it('leaves text untimed when there is nothing to align with', () => {
+    const doc = alignToTimings('only text', { version: 1, lines: [] })
+    expect(doc.lines[0]!.words.every((w) => w.start === null)).toBe(true)
+  })
+})
+
+describe('helpers', () => {
+  it('interpolates untimed words between timed ones', () => {
+    const line = interpolateLine({
+      id: 'l',
+      kind: 'lyric',
+      words: [
+        { id: '1', text: 'a', start: 1, end: null },
+        { id: '2', text: 'b', start: null, end: null },
+        { id: '3', text: 'c', start: 2, end: 2.5 }
+      ]
+    })
+    expect(line.words.map((w) => w.start)).toEqual([1, 1.5, 2])
+    expect(line.words[0]!.end).toBe(1.5)
+  })
+
+  it('returns the lyrics sung inside a time range', () => {
+    const doc = parseLyrics('[00:01.00]one two\n[00:05.00]three four\n[00:09.00]five', 'lrc')
+    expect(lyricsInRange(doc, 4, 9)).toBe('three four')
+    expect(lyricsInRange(doc, 0, 100)).toBe('one two\nthree four\nfive')
+    expect(lyricsInRange(doc, 4, 9, -4)).toBe('five')
+  })
+})

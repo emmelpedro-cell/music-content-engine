@@ -44,8 +44,8 @@ export function NewProjectDialog({ onCancel, onCreate }: Props) {
       <form className="dialog" onSubmit={submit} aria-labelledby="new-project-title">
         <h2 id="new-project-title">New song project</h2>
         <p className="muted">
-          A project holds one song and everything made from it: lyrics, hooks, footage and edits. You'll import the
-          audio once media import is available (Phase 1).
+          A project holds one song and everything made from it: lyrics, hooks, footage and edits. After creating it,
+          choose the song's audio file to analyse beats and sync lyrics.
         </p>
         <label className="field">
           <span>Song title</span>

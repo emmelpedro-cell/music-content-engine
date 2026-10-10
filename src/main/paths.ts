@@ -22,7 +22,8 @@ export const APP_DATA_SUBDIRECTORIES = [
   'presets',
   'temp',
   'logs',
-  'backups'
+  'backups',
+  'models'
 ] as const
 
 export type AppLayout = {

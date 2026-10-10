@@ -26,6 +26,22 @@ export const IpcChannels = {
   mediaRelinkFolder: 'media:relink-folder',
   mediaCheckAvailability: 'media:check-availability',
   mediaShowInFolder: 'media:show-in-folder',
+  workspaceGet: 'workspace:get',
+  workspaceWaveform: 'workspace:waveform',
+  analysisReanalyze: 'analysis:reanalyze',
+  beatsSetCorrections: 'beats:set-corrections',
+  lyricsSave: 'lyrics:save',
+  lyricsTranscribe: 'lyrics:transcribe',
+  lyricsCancelTranscription: 'lyrics:cancel-transcription',
+  speechStatus: 'speech:status',
+  speechRecheck: 'speech:recheck',
+  modelsList: 'models:list',
+  modelsDownload: 'models:download',
+  modelsCancel: 'models:cancel',
+  modelsDelete: 'models:delete',
+  hooksCreate: 'hooks:create',
+  hooksUpdate: 'hooks:update',
+  hooksDelete: 'hooks:delete',
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
   settingsChooseDataDirectory: 'settings:choose-data-directory',
@@ -39,5 +55,6 @@ export const ALL_IPC_CHANNELS: readonly IpcChannel[] = Object.values(IpcChannels
 
 /** Main → renderer push channels (not invokable from the renderer). */
 export const IpcEvents = {
-  media: 'media:event'
+  media: 'media:event',
+  workspace: 'workspace:event'
 } as const

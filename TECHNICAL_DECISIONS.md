@@ -121,9 +121,38 @@ Additionally, every call checks `event.senderFrame.url` against the app's own pa
 **Decision:** `tsconfig.e2e.json` adds DOM types for Playwright `page.evaluate` callbacks. Unit tests that touch media use the real pinned FFmpeg and generate their fixtures with it (`tests/helpers/media.ts`); without FFmpeg they skip locally but fail in CI.
 **Why:** media handling is only meaningful against the real tools; generated fixtures avoid committing binary media.
 
+## TD-021 — Music analysis in TypeScript, in a worker thread
+
+**Decision:** beat and tempo analysis is our own TypeScript code (`src/main/analysis/`). FFmpeg decodes the song to 22,050 Hz mono float (30-minute limit). The analysis builds a spectral-flux onset envelope (1024-point FFT, hop 256) plus a low-band envelope; estimates tempo by autocorrelation weighted with a log-normal prior around 120 BPM, with sub-sample refinement and a half-time rule above 180 BPM; tracks beats with dynamic programming (Ellis 2007); and picks the bar phase from low-frequency (kick) onsets. It also stores an energy curve (10 values/s) and waveform peaks (min/max, 100/s, `app-data/waveforms/<asset>.peaks`). It runs in a `worker_thread` (`out/main/analysis-worker.js`), so the UI never blocks. Results are cached per asset, keyed by content fingerprint and `ANALYSIS_VERSION`: changing the algorithm re-analyses automatically.
+When the beat is too weak to trust (salience below a threshold, e.g. a pad or speech), no beats are invented: the result says "no clear beat" and the user can set a manual grid. Every result carries warnings (ambiguous tempo, unsteady tempo, uncertain downbeat) that the Beats tab shows.
+**Alternatives:** Essentia / Essentia.js (AGPL v3: would force the whole app under AGPL), aubio (GPL v3), madmom (models are non-commercial), a Python worker with librosa (a Python runtime to ship and maintain on Windows).
+**Why:** no license constraints, no extra runtime, deterministic and testable. Accuracy is measured with synthetic tracks of known tempo and beats (several tempos and offsets, human timing jitter, tempo ramps, 3/4 time, and silence, noise and pads that must give "no clear beat"). Real recordings vary more, which is why everything detected is correctable (TD-022). A stronger detector can replace it later behind the same `MusicAnalysis` type.
+
+## TD-022 — Detected analysis and user corrections are stored separately
+
+**Decision:** `music_analyses` holds what the algorithm found (per audio asset). `song_beat_corrections` holds what the user decided (per song): mode (detected beats or a manual grid with BPM and anchor), global shift, half/double time, beats per bar, bar start, and individually added or removed beats (matched by time, ±40 ms). The beat map the UI and later phases use is computed by a pure function, `resolveBeatMap(analysis, corrections)`.
+**Why:** spec: automatic analysis isn't the truth and must be correctable. Re-analysing (new algorithm version, "Analyse again") never loses corrections, because they are applied on top of the new result. "Reset corrections" returns to the detected map.
+
+## TD-023 — Transcription with whisper.cpp; models on demand
+
+**Decision:** bundle the official whisper.cpp 1.8.4 CPU build for Windows x64 (MIT; only `whisper-cli.exe` and its DLLs), pinned and checksum-verified like FFmpeg. Speech models are downloaded only when the user clicks Download, from the official whisper.cpp repository on Hugging Face, with pinned SHA-256. Large v3 Turbo (q5_0) is recommended for sung lyrics and Portuguese. Word timings come from one-word segments (`-ml 1 -sow`) with token probabilities as confidence. Details: `docs/TRANSCRIPTION.md`.
+**Alternatives:** faster-whisper (Python + CTranslate2 runtime to ship), Whisper in the browser via ONNX/transformers.js (slower, memory-heavy for large models), a cloud API (sends the user's unreleased music off the machine).
+**Why:** local, fast enough on CPU, small to bundle (4 MB), permissive license. DTW token timestamps (`-dtw`) were tried and returned no timings for this build, so they are not used. Requires the MSVC runtime; missing runtime is detected and explained (`RUNTIME_MISSING`).
+
+## TD-024 — Lyrics: original transcription vs. user's document
+
+**Decision:** each song has one lyric document (lines of words with optional times, edited flags, instrumental sections) plus the last original transcription, stored separately. A new transcription only replaces the document automatically when the document is empty; otherwise the user chooses "Use latest transcription". Status is `empty`, `draft` or `confirmed`; only an explicit "Mark as checked" confirms, any edit makes it a draft again, and changing the song's audio turns checked lyrics back into a draft. Pasted correct lyrics take their timings from the transcription by edit-distance alignment.
+**Why:** the spec requires manual corrections to survive re-analysis; transcription of singing is error-prone, so the user's text always wins and the app never claims lyrics are verified unless the user said so.
+
+## TD-025 — Song workspace timeline drawn on a canvas
+
+**Decision:** the song workspace has one timeline (ruler with bar numbers, waveform, energy curve, beats and downbeats, hooks lane, lyrics lane, selection, playhead) drawn on a single `<canvas>` sized to the visible width; a native scrollbar handles horizontal scroll and zoom goes from "fit" to 800 px/s. Playback uses an `<audio>` element on `mce-media://`, with a Web Audio click on beats to check markers by ear.
+**Alternatives:** DOM elements per beat/word (thousands of nodes on long songs), wavesurfer.js (BSD, but its region/marker model doesn't match beats + lyrics + hooks and would have to be bent).
+**Why:** stays smooth with long songs and many markers; the drawing code is small and fully under our control. The same component can grow into the editing timeline later.
+
 ## Open decisions
 
 - **H.264 export encoder** (Phase 3): OpenH264 vs. hardware encoders vs. a GPL build with libx264 (see TD-012).
-- **Audio analysis runtime** (Phase 2): Essentia.js in a worker vs. a Python worker with librosa/madmom.
-- **Transcription engine** (Phase 2): whisper.cpp binary vs. Python faster-whisper; word-level alignment approach.
+- **Song sections** (verse/chorus detection): not built in Phase 2; hooks are chosen by hand. Revisit with clip selection in Phase 3 if automatic suggestions are needed.
+- **Bundling the MSVC runtime** with the installer if users hit `RUNTIME_MISSING` often (TD-023).
 - **Remotion licensing** (Phase 3): free for individuals and small teams; check the current license terms before any commercial distribution.

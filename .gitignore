@@ -9,3 +9,5 @@ playwright-report/
 !.vscode/extensions.json
 e2e-data/
 vendor/ffmpeg/
+vendor/whisper/
+vendor/whisper-models/

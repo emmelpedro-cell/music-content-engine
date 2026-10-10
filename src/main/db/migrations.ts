@@ -81,6 +81,63 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE songs ADD COLUMN audio_asset_id TEXT REFERENCES media_assets (id) ON DELETE SET NULL;
       CREATE INDEX idx_songs_audio_asset_id ON songs (audio_asset_id);
     `
+  },
+  {
+    version: 3,
+    name: 'analysis_lyrics_hooks',
+    sql: `
+      -- Automatic analysis of an audio file. Recomputable; never edited by the user.
+      CREATE TABLE music_analyses (
+        asset_id         TEXT PRIMARY KEY NOT NULL REFERENCES media_assets (id) ON DELETE CASCADE,
+        content_hash     TEXT,
+        analysis_version INTEGER NOT NULL,
+        status           TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'ready', 'error')),
+        error_message    TEXT,
+        result_json      TEXT,
+        waveform_path    TEXT,
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+      );
+      CREATE INDEX idx_music_analyses_status ON music_analyses (status);
+
+      -- The user's beat corrections for a song, applied on top of the analysis.
+      CREATE TABLE song_beat_corrections (
+        song_id          TEXT PRIMARY KEY NOT NULL REFERENCES songs (id) ON DELETE CASCADE,
+        corrections_json TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+      );
+
+      -- Lyrics: the user's document, plus the untouched transcription it may come from.
+      CREATE TABLE lyric_documents (
+        song_id              TEXT PRIMARY KEY NOT NULL REFERENCES songs (id) ON DELETE CASCADE,
+        status               TEXT NOT NULL CHECK (status IN ('empty', 'draft', 'confirmed')),
+        source               TEXT CHECK (source IS NULL OR source IN ('transcription', 'import', 'manual')),
+        language             TEXT,
+        document_json        TEXT NOT NULL,
+        original_json        TEXT,
+        offset_seconds       REAL NOT NULL DEFAULT 0,
+        transcription_status TEXT NOT NULL DEFAULT 'none'
+                             CHECK (transcription_status IN ('none', 'pending', 'processing', 'ready', 'error')),
+        transcription_error  TEXT,
+        transcription_model  TEXT,
+        transcription_language TEXT,
+        updated_at           TEXT NOT NULL
+      );
+
+      CREATE TABLE hooks (
+        id            TEXT PRIMARY KEY NOT NULL,
+        song_id       TEXT NOT NULL REFERENCES songs (id) ON DELETE CASCADE,
+        name          TEXT NOT NULL CHECK (length(trim(name)) > 0),
+        start_seconds REAL NOT NULL CHECK (start_seconds >= 0),
+        end_seconds   REAL NOT NULL,
+        notes         TEXT,
+        tags_json     TEXT NOT NULL DEFAULT '[]',
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        CHECK (end_seconds > start_seconds)
+      );
+      CREATE INDEX idx_hooks_song ON hooks (song_id, start_seconds);
+    `
   }
 ]
 

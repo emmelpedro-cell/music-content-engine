@@ -11,7 +11,7 @@ type Props = {
 }
 
 /** Phases that have shipped. */
-const DONE_PHASES = new Set([1])
+const DONE_PHASES = new Set([1, 2])
 
 const PIPELINE = [
   { label: 'Import music', phase: 1 },
