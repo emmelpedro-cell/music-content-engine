@@ -17,13 +17,22 @@ jobs:
     steps:
       - name: Release assets
         run: |
-          gh release view "$TAG" -R ggml-org/whisper.cpp --json assets --jq '.assets[] | .name + " " + (.size|tostring)' > assets.txt
-          echo "::notice title=whisper assets::$(tr '\n' '|' < assets.txt)"
+          gh release list -R ggml-org/whisper.cpp --limit 6 > releases.txt 2>&1 || true
+          echo "::notice title=releases::$(tr '\n\t' '| ' < releases.txt)"
+          for t in v1.9.5 v1.9.4 v1.9.3 v1.8.0; do
+            gh release view "$t" -R ggml-org/whisper.cpp --json assets --jq '.assets[].name' > "a-$t.txt" 2>&1 || true
+            echo "::notice title=assets $t::$(tr '\n' ' ' < a-$t.txt)"
+          done
       - name: CPU binary
         run: |
-          curl -sSL -o bin.zip "https://github.com/ggml-org/whisper.cpp/releases/download/$TAG/whisper-bin-x64.zip"
-          echo "::notice title=bin sha::$(sha256sum bin.zip) $(stat -c %s bin.zip)"
-          mkdir w && cd w && unzip -q ../bin.zip && echo "::notice title=bin files::$(find . -type f | sort | tr '\n' '|')"
+          for t in v1.9.5 v1.9.4 v1.9.3 v1.8.0; do
+            name=$(grep -E '^whisper-bin-x64\.zip$' "a-$t.txt" | head -1)
+            if [ -n "$name" ]; then TAGF=$t; break; fi
+          done
+          echo "TAGF=$TAGF" >> "$GITHUB_ENV"
+          curl -sSfL -o bin.zip "https://github.com/ggml-org/whisper.cpp/releases/download/$TAGF/whisper-bin-x64.zip"
+          echo "::notice title=bin sha $TAGF::$(sha256sum bin.zip) $(stat -c %s bin.zip)"
+          mkdir w && cd w && unzip -q ../bin.zip && echo "::notice title=bin files::$(find . -type f | sort | tr '\n' ' ')"
       - name: CLI help
         run: |
           CLI=$(find w -name whisper-cli.exe | head -1)
