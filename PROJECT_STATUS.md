@@ -46,6 +46,12 @@ Acceptance criterion: _the user can verify lyrics and inspect beat markers again
 - Over the instrumental ending Whisper repeated one phrase 25 times (repetition loop) → runs of 6+ identical lines are collapsed into a marked section "Repeated phrase removed… check this part". Trying `--max-context 0` instead removed the loop but made the verses worse (WER 18.8 %) and invented subtitle credits over the ending, so the default is kept.
 - Pasting the correct lyrics ("Paste lyrics…") aligned 421 of 442 words; the rest were first words of lines with nothing to interpolate from → now placed next to their line's matched words: **442 of 442 words timed, all in order**. A karaoke render from that result was sent to the artist to check the timing by eye.
 
+**Second real song (2026-10-10): Nepali trap, 2:27, plus five phone videos of the artist rapping to it (song playing from another phone).**
+- Beat analysis first read 99.6 BPM with beats wandering 20–80 ms (triplet hi-hats look periodic at 2/3 of the tempo). Fixed: 3:2 relatives are checked against where the attacks land, and a steady grid replaces the tracked beats when the tracker wanders but one constant-tempo grid fits. Now 150.04 BPM, steady. Regression test with a synthetic trap loop (fails before the fix). Indian Fall 2 stays at 109 BPM.
+- Transcription (Large v3 Turbo, language forced to Nepali) is poor: invented text in the intro, a one-word loop, a missed minute, and one chorus written in Hangul. Single-word loops are now collapsed too.
+- Romanised lyrics vs. Devanagari transcription share almost no spelling, so lyrics can now also be aligned by sound (cross-script consonant skeletons, word level, free ends for partial lyrics). With the artist's partial lyrics, 18 of 20 lines got timings; the well-heard parts land where Whisper heard them.
+- Prototype (not in the app yet): audio sync of the five videos to the master by cross-correlating band-energy features. Each video's start in the song was found consistently to ±2 ms over 8–9 windows; two videos started before the music. A synced 5-up mosaic, a 9:16 edit cutting between takes on every bar and the same edit with karaoke captions were rendered for review.
+
 Not yet checked by hand: the installer on a real PC.
 
 ## Known issues / limitations
