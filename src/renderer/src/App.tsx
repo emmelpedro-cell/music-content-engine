@@ -4,7 +4,11 @@ import { api, errorMessage, unwrap } from './api'
 import { NewProjectDialog } from './components/NewProjectDialog'
 import { Sidebar, type ScreenId } from './components/Sidebar'
 import { Notice, type NoticeState } from './components/Notice'
+import { DropOverlay } from './components/media/DropOverlay'
+import { importNotice } from './media/format'
+import { useMediaLibrary } from './media/useMediaLibrary'
 import { HomeScreen } from './screens/HomeScreen'
+import { MediaLibraryScreen } from './screens/MediaLibraryScreen'
 import { SongsScreen } from './screens/SongsScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { PhasePlaceholder, PLACEHOLDERS } from './screens/PhasePlaceholder'
@@ -21,6 +25,13 @@ export function App() {
 
   const showError = useCallback((error: unknown) => setNotice({ tone: 'error', text: errorMessage(error) }), [])
   const dismissNotice = useCallback(() => setNotice(null), [])
+  const library = useMediaLibrary(
+    useCallback(
+      (fileName: string, existing: string) =>
+        setNotice({ tone: 'info', text: `“${fileName}” wasn’t added: the same file is already in the library as “${existing}”.` }),
+      []
+    )
+  )
 
   const refreshProjects = useCallback(async () => {
     setProjects(await unwrap(api.projects.list()))
@@ -58,6 +69,17 @@ export function App() {
     setScreen('songs')
   }
 
+  async function importDropped(files: File[]) {
+    setScreen('media')
+    try {
+      const summary = await unwrap(api.media.importDropped(files))
+      const n = importNotice(summary)
+      if (n) setNotice(n)
+    } catch (error) {
+      showError(error)
+    }
+  }
+
   if (loadError) {
     return (
       <div className="fatal">
@@ -73,26 +95,37 @@ export function App() {
       <Sidebar current={screen} onNavigate={setScreen} version={info?.version} />
       <main className="main" aria-live="polite">
         {screen === 'home' && (
-          <HomeScreen projects={projects} onNewProject={() => setCreating(true)} onOpenProject={openProject} />
+          <HomeScreen
+            projects={projects}
+            assets={library.assets}
+            onNewProject={() => setCreating(true)}
+            onOpenProject={openProject}
+            onOpenLibrary={() => setScreen('media')}
+          />
         )}
         {screen === 'songs' && (
           <SongsScreen
             projects={projects}
+            assets={library.assets}
             selectedId={selectedId}
             onSelect={setSelectedId}
             onNewProject={() => setCreating(true)}
             onChanged={refreshProjects}
+            onOpenLibrary={() => setScreen('media')}
             onNotice={setNotice}
             onError={showError}
           />
         )}
-        {(screen === 'media' || screen === 'create' || screen === 'presets' || screen === 'exports') && (
+        {screen === 'media' && <MediaLibraryScreen library={library} onNotice={setNotice} onError={showError} />}
+        {(screen === 'create' || screen === 'presets' || screen === 'exports') && (
           <PhasePlaceholder {...PLACEHOLDERS[screen]} />
         )}
         {screen === 'settings' && settings && info && (
           <SettingsScreen
             settings={settings}
             info={info}
+            tools={library.tools}
+            onRecheckTools={library.recheckTools}
             onSettingsChanged={setSettings}
             onInfoChanged={refreshInfo}
             onNotice={setNotice}
@@ -100,6 +133,7 @@ export function App() {
           />
         )}
       </main>
+      <DropOverlay enabled={library.tools?.ok === true} onDrop={importDropped} />
       {creating && <NewProjectDialog onCancel={() => setCreating(false)} onCreate={createProject} />}
       {notice && <Notice notice={notice} onDismiss={dismissNotice} />}
     </div>

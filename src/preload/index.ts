@@ -1,6 +1,7 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { MceApi } from '../shared/api'
-import { IpcChannels, type IpcChannel } from '../shared/channels'
+import { IpcChannels, IpcEvents, type IpcChannel } from '../shared/channels'
+import type { MediaEvent } from '../shared/media'
 import type { IpcResult } from '../shared/schemas'
 
 /**
@@ -20,7 +21,46 @@ const api: MceApi = {
     get: (id) => call(IpcChannels.projectsGet, { id }),
     create: (input) => call(IpcChannels.projectsCreate, input),
     update: (input) => call(IpcChannels.projectsUpdate, input),
+    setAudio: (id, audioAssetId) => call(IpcChannels.projectsSetAudio, { id, audioAssetId }),
     delete: (id) => call(IpcChannels.projectsDelete, { id })
+  },
+  media: {
+    toolsStatus: () => call(IpcChannels.mediaToolsStatus),
+    recheckTools: () => call(IpcChannels.mediaToolsRecheck),
+    list: () => call(IpcChannels.mediaList),
+    queueState: () => call(IpcChannels.mediaQueueState),
+    importWithDialog: (mode) => call(IpcChannels.mediaImportDialog, { mode }),
+    importDropped: (files) => {
+      // Real paths are only obtainable from genuine File objects (drag-and-drop or <input>),
+      // so the renderer can't hand arbitrary path strings to the main process.
+      const paths = Array.from(files)
+        .map((file) => webUtils.getPathForFile(file))
+        .filter((path) => path.length > 0)
+      if (paths.length === 0) {
+        return Promise.resolve({
+          ok: false,
+          error: { code: 'VALIDATION', message: 'Nothing importable was dropped. Drop files or folders from your computer.' }
+        })
+      }
+      return call(IpcChannels.mediaImportPaths, { paths })
+    },
+    cancel: (id) => call(IpcChannels.mediaCancel, { id }),
+    cancelAll: () => call(IpcChannels.mediaCancelAll),
+    retry: (id) => call(IpcChannels.mediaRetry, { id }),
+    remove: (id) => call(IpcChannels.mediaRemove, { id }),
+    relink: (id) => call(IpcChannels.mediaRelink, { id }),
+    relinkConfirm: (id) => call(IpcChannels.mediaRelinkConfirm, { id }),
+    relinkFolder: () => call(IpcChannels.mediaRelinkFolder),
+    checkAvailability: () => call(IpcChannels.mediaCheckAvailability),
+    showInFolder: (id) => call(IpcChannels.mediaShowInFolder, { id }),
+    onEvent: (listener) => {
+      // Only the payload is forwarded; the IpcRendererEvent (with its sender) never reaches the page.
+      const handler = (_event: Electron.IpcRendererEvent, payload: MediaEvent) => listener(payload)
+      ipcRenderer.on(IpcEvents.media, handler)
+      return () => {
+        ipcRenderer.removeListener(IpcEvents.media, handler)
+      }
+    }
   },
   settings: {
     get: () => call(IpcChannels.settingsGet),

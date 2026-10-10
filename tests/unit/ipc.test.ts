@@ -7,6 +7,9 @@ import { runMigrations } from '../../src/main/db/migrations'
 import { wrapHandler } from '../../src/main/ipc/handler'
 import { buildHandlers, type HandlerTable } from '../../src/main/ipc/handlers'
 import { ProjectsRepository } from '../../src/main/repositories/projects'
+import { MediaRepository } from '../../src/main/repositories/media'
+import { ImportService } from '../../src/main/media/import-service'
+import { UnavailableError } from '../../src/main/errors'
 import { SettingsRepository } from '../../src/main/repositories/settings'
 import { createSenderValidator } from '../../src/main/security'
 import { createNodeSqliteDriver, memoryLogger } from '../helpers/node-sqlite-driver'
@@ -15,6 +18,7 @@ function setup() {
   const db = createNodeSqliteDriver()
   runMigrations(db)
   const logger = memoryLogger()
+  const mediaRepo = new MediaRepository(db)
   const table = buildHandlers({
     projects: new ProjectsRepository(db),
     settings: new SettingsRepository(db, logger),
@@ -25,7 +29,26 @@ function setup() {
     },
     openLogsFolder: async () => {},
     chooseDataDirectory: async () => ({ changed: false }),
-    chooseExportDirectory: async () => ({ changed: false })
+    chooseExportDirectory: async () => ({ changed: false }),
+    media: {
+      repo: mediaRepo,
+      service: new ImportService({
+        repo: mediaRepo,
+        getTools: async () => {
+          throw new UnavailableError('FFmpeg is missing from this installation. Reinstall Music Content Engine.')
+        },
+        thumbnailsDirectory: '/nonexistent/thumbs',
+        tempDirectory: '/nonexistent/temp',
+        logger,
+        emit: () => {}
+      }),
+      toolsStatus: async () => ({ ok: false, source: 'packaged', directory: '/x', code: 'MISSING', message: 'missing', detail: '' }),
+      recheckTools: async () => ({ ok: false, source: 'packaged', directory: '/x', code: 'MISSING', message: 'missing', detail: '' }),
+      importWithDialog: async () => ({ cancelled: true }),
+      relinkWithDialog: async () => ({ status: 'cancelled' }),
+      relinkFolderWithDialog: async () => ({ cancelled: true }),
+      showInFolder: () => {}
+    }
   })
   const call = <T>(channel: keyof HandlerTable, input?: unknown) =>
     wrapHandler(channel, table[channel], logger)(input) as Promise<IpcResult<T>>
@@ -70,7 +93,16 @@ describe('IPC handlers', () => {
       [IpcChannels.projectsList, { unexpected: true }],
       [IpcChannels.settingsUpdate, { accentColor: 'red' }],
       [IpcChannels.settingsUpdate, { exportDirectory: 'C:\\Windows' }],
-      [IpcChannels.logWrite, { level: 'fatal', message: 'x' }]
+      [IpcChannels.logWrite, { level: 'fatal', message: 'x' }],
+      [IpcChannels.mediaImportPaths, { paths: [] }],
+      [IpcChannels.mediaImportPaths, { paths: 'C:\\Windows' }],
+      [IpcChannels.mediaImportPaths, { paths: Array.from({ length: 2001 }, () => '/x.mp4') }],
+      [IpcChannels.mediaImportDialog, { mode: 'everything' }],
+      [IpcChannels.mediaCancel, { id: '../../etc' }],
+      [IpcChannels.mediaRemove, {}],
+      [IpcChannels.mediaShowInFolder, { id: 1 }],
+      [IpcChannels.mediaRelink, { id: 'x', path: '/etc/passwd' }],
+      [IpcChannels.projectsSetAudio, { id: '00000000-0000-4000-8000-000000000000', audioAssetId: 'nope' }]
     ]
     for (const [channel, input] of cases) {
       const result = await ctx.call(channel, input)
@@ -89,6 +121,24 @@ describe('IPC handlers', () => {
     expect(result.error.message).not.toContain('internal detail')
     const logged = ctx.logger.entries.find((e) => e.level === 'error')
     expect((logged?.context?.error as Error).message).toBe('internal detail that must not leak')
+  })
+
+  it('reports unavailable FFmpeg with its actionable message', async () => {
+    const result = await ctx.call(IpcChannels.mediaImportPaths, { paths: ['/music/take.mp4'] })
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'UNAVAILABLE', message: 'FFmpeg is missing from this installation. Reinstall Music Content Engine.' }
+    })
+  })
+
+  it('lists an empty media library and idle queue', async () => {
+    expect(await ctx.call(IpcChannels.mediaList)).toEqual({ ok: true, data: [] })
+    expect(await ctx.call(IpcChannels.mediaQueueState)).toEqual({
+      ok: true,
+      data: { active: false, total: 0, completed: 0, failed: 0, current: [] }
+    })
+    const missing = await ctx.call(IpcChannels.mediaRemove, { id: '00000000-0000-4000-8000-000000000000' })
+    expect(!missing.ok && missing.error.code).toBe('NOT_FOUND')
   })
 
   it('updates settings through the allowed keys only', async () => {

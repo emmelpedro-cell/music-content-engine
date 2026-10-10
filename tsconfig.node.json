@@ -23,9 +23,9 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/shared/**/*",
-    "tests/**/*",
     "electron.vite.config.ts",
     "vitest.config.ts",
-    "playwright.config.ts"
+    "tests/unit/**/*",
+    "tests/helpers/**/*"
   ]
 }

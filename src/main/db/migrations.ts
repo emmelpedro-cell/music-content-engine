@@ -38,6 +38,49 @@ export const MIGRATIONS: readonly Migration[] = [
         updated_at TEXT NOT NULL
       );
     `
+  },
+  {
+    version: 2,
+    name: 'media_assets',
+    sql: `
+      CREATE TABLE media_assets (
+        id                      TEXT PRIMARY KEY NOT NULL,
+        source_path             TEXT NOT NULL,
+        path_key                TEXT NOT NULL UNIQUE,
+        file_name               TEXT NOT NULL,
+        file_size               INTEGER NOT NULL CHECK (file_size >= 0),
+        file_mtime_ms           REAL,
+        content_hash            TEXT,
+        kind                    TEXT CHECK (kind IS NULL OR kind IN ('audio', 'video')),
+        status                  TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'ready', 'error')),
+        error_message           TEXT,
+        availability            TEXT NOT NULL DEFAULT 'online' CHECK (availability IN ('online', 'missing')),
+        duration_seconds        REAL CHECK (duration_seconds IS NULL OR duration_seconds >= 0),
+        container               TEXT,
+        video_codec             TEXT,
+        audio_codec             TEXT,
+        width                   INTEGER,
+        height                  INTEGER,
+        frame_rate              REAL,
+        rotation                INTEGER,
+        sample_rate             INTEGER,
+        channels                INTEGER,
+        bit_rate                INTEGER,
+        thumbnail_path          TEXT,
+        proxy_path              TEXT,
+        probe_json              TEXT,
+        imported_at             TEXT NOT NULL,
+        updated_at              TEXT NOT NULL,
+        availability_checked_at TEXT
+      );
+      CREATE INDEX idx_media_assets_content_hash ON media_assets (content_hash);
+      CREATE INDEX idx_media_assets_status ON media_assets (status);
+      CREATE INDEX idx_media_assets_imported_at ON media_assets (imported_at DESC);
+
+      -- A song's audio is a library asset. Removing the asset from the library unlinks it.
+      ALTER TABLE songs ADD COLUMN audio_asset_id TEXT REFERENCES media_assets (id) ON DELETE SET NULL;
+      CREATE INDEX idx_songs_audio_asset_id ON songs (audio_asset_id);
+    `
   }
 ]
 

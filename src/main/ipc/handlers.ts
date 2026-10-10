@@ -1,15 +1,27 @@
 import { IpcChannels, type IpcChannel } from '../../shared/channels'
 import {
+  AssetIdInputSchema,
+  ImportDialogInputSchema,
+  ImportPathsInputSchema,
+  type ImportDialogResult,
+  type MediaToolsStatus,
+  type RelinkFolderResult,
+  type RelinkResult
+} from '../../shared/media'
+import {
   CreateProjectInputSchema,
   EmptyInputSchema,
   LogWriteInputSchema,
   ProjectIdInputSchema,
+  SetProjectAudioInputSchema,
   SettingsUpdateInputSchema,
   UpdateProjectInputSchema,
   type AppInfo,
   type DirectoryChoiceResult
 } from '../../shared/schemas'
 import type { Logger } from '../logger'
+import type { ImportService } from '../media/import-service'
+import type { MediaRepository } from '../repositories/media'
 import type { ProjectsRepository } from '../repositories/projects'
 import type { SettingsRepository } from '../repositories/settings'
 import { defineHandler, type HandlerDefinition } from './handler'
@@ -24,6 +36,17 @@ export type HandlerDeps = {
   openLogsFolder: () => Promise<void>
   chooseDataDirectory: () => Promise<DirectoryChoiceResult>
   chooseExportDirectory: () => Promise<DirectoryChoiceResult>
+  media: {
+    repo: MediaRepository
+    service: ImportService
+    toolsStatus: () => Promise<MediaToolsStatus>
+    recheckTools: () => Promise<MediaToolsStatus>
+    /** Native dialogs and shell integration live in main/index.ts. */
+    importWithDialog: (mode: 'files' | 'folder') => Promise<ImportDialogResult>
+    relinkWithDialog: (id: string) => Promise<RelinkResult>
+    relinkFolderWithDialog: () => Promise<RelinkFolderResult>
+    showInFolder: (id: string) => void
+  }
 }
 
 // Input/output types are enforced per entry by defineHandler; the table itself is heterogeneous.
@@ -31,6 +54,7 @@ export type HandlerDeps = {
 export type HandlerTable = Record<IpcChannel, HandlerDefinition<any, any>>
 
 export function buildHandlers(deps: HandlerDeps): HandlerTable {
+  const { media } = deps
   return {
     [IpcChannels.appGetInfo]: defineHandler({
       schema: EmptyInputSchema,
@@ -64,11 +88,92 @@ export function buildHandlers(deps: HandlerDeps): HandlerTable {
       schema: UpdateProjectInputSchema,
       handle: (input) => deps.projects.update(input)
     }),
+    [IpcChannels.projectsSetAudio]: defineHandler({
+      schema: SetProjectAudioInputSchema,
+      handle: ({ id, audioAssetId }) => deps.projects.setAudio(id, audioAssetId)
+    }),
     [IpcChannels.projectsDelete]: defineHandler({
       schema: ProjectIdInputSchema,
       handle: ({ id }) => {
         deps.projects.delete(id)
         deps.logger.info('Project deleted', { id })
+        return null
+      }
+    }),
+
+    [IpcChannels.mediaToolsStatus]: defineHandler({
+      schema: EmptyInputSchema,
+      handle: () => media.toolsStatus()
+    }),
+    [IpcChannels.mediaToolsRecheck]: defineHandler({
+      schema: EmptyInputSchema,
+      handle: async () => {
+        const status = await media.recheckTools()
+        if (status.ok) media.service.resume()
+        return status
+      }
+    }),
+    [IpcChannels.mediaList]: defineHandler({
+      schema: EmptyInputSchema,
+      handle: () => media.repo.list()
+    }),
+    [IpcChannels.mediaQueueState]: defineHandler({
+      schema: EmptyInputSchema,
+      handle: () => media.service.queueState()
+    }),
+    [IpcChannels.mediaImportDialog]: defineHandler({
+      schema: ImportDialogInputSchema,
+      handle: ({ mode }) => media.importWithDialog(mode)
+    }),
+    [IpcChannels.mediaImportPaths]: defineHandler({
+      schema: ImportPathsInputSchema,
+      handle: ({ paths }) => media.service.importPaths(paths)
+    }),
+    [IpcChannels.mediaCancel]: defineHandler({
+      schema: AssetIdInputSchema,
+      handle: async ({ id }) => {
+        await media.service.cancel(id)
+        return null
+      }
+    }),
+    [IpcChannels.mediaCancelAll]: defineHandler({
+      schema: EmptyInputSchema,
+      handle: async () => {
+        await media.service.cancelAll()
+        return null
+      }
+    }),
+    [IpcChannels.mediaRetry]: defineHandler({
+      schema: AssetIdInputSchema,
+      handle: ({ id }) => media.service.retry(id)
+    }),
+    [IpcChannels.mediaRemove]: defineHandler({
+      schema: AssetIdInputSchema,
+      handle: async ({ id }) => {
+        await media.service.remove(id)
+        return null
+      }
+    }),
+    [IpcChannels.mediaRelink]: defineHandler({
+      schema: AssetIdInputSchema,
+      handle: ({ id }) => media.relinkWithDialog(id)
+    }),
+    [IpcChannels.mediaRelinkConfirm]: defineHandler({
+      schema: AssetIdInputSchema,
+      handle: ({ id }) => media.service.confirmRelink(id)
+    }),
+    [IpcChannels.mediaRelinkFolder]: defineHandler({
+      schema: EmptyInputSchema,
+      handle: () => media.relinkFolderWithDialog()
+    }),
+    [IpcChannels.mediaCheckAvailability]: defineHandler({
+      schema: EmptyInputSchema,
+      handle: () => media.service.checkAvailability()
+    }),
+    [IpcChannels.mediaShowInFolder]: defineHandler({
+      schema: AssetIdInputSchema,
+      handle: ({ id }) => {
+        media.showInFolder(id)
         return null
       }
     }),

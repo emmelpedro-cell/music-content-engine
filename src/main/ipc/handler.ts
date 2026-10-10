@@ -1,11 +1,23 @@
 import type { ZodType, ZodTypeDef } from 'zod'
-import type { IpcResult } from '../../shared/schemas'
+import type { IpcErrorCode, IpcResult } from '../../shared/schemas'
 import type { Logger } from '../logger'
-import { NotFoundError } from '../repositories/projects'
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  UnavailableError,
+  UnprocessableError
+} from '../errors'
 
-export class ForbiddenError extends Error {
-  override name = 'ForbiddenError'
-}
+export { ForbiddenError }
+
+const KNOWN_ERRORS: [new (...args: never[]) => Error, IpcErrorCode][] = [
+  [NotFoundError, 'NOT_FOUND'],
+  [ForbiddenError, 'FORBIDDEN'],
+  [UnavailableError, 'UNAVAILABLE'],
+  [ConflictError, 'CONFLICT'],
+  [UnprocessableError, 'UNPROCESSABLE']
+]
 
 export type HandlerDefinition<In, Out> = {
   schema: ZodType<In, ZodTypeDef, unknown>
@@ -42,11 +54,8 @@ export function wrapHandler<In, Out>(
       const data = await definition.handle(parsed.data)
       return { ok: true, data }
     } catch (error) {
-      if (error instanceof NotFoundError) {
-        return { ok: false, error: { code: 'NOT_FOUND', message: error.message } }
-      }
-      if (error instanceof ForbiddenError) {
-        return { ok: false, error: { code: 'FORBIDDEN', message: error.message } }
+      for (const [type, code] of KNOWN_ERRORS) {
+        if (error instanceof type) return { ok: false, error: { code, message: error.message } }
       }
       logger.error('IPC handler failed', { channel, error })
       return {
