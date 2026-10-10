@@ -19,14 +19,14 @@ jobs:
         run: |
           gh release list -R ggml-org/whisper.cpp --limit 6 > releases.txt 2>&1 || true
           echo "::notice title=releases::$(tr '\n\t' '| ' < releases.txt)"
-          for t in v1.9.5 v1.9.4 v1.9.3 v1.8.0; do
+          for t in v1.9.5 b5454 v1.9.4 v1.8.4 v1.8.3 v1.8.2 v1.8.1 v1.8.0; do
             gh release view "$t" -R ggml-org/whisper.cpp --json assets --jq '.assets[].name' > "a-$t.txt" 2>&1 || true
-            echo "::notice title=assets $t::$(tr '\n' ' ' < a-$t.txt)"
+            echo "::notice title=assets $t::count=$(wc -l < a-$t.txt) $(tr '\n' ' ' < a-$t.txt)"
           done
       - name: CPU binary
         run: |
-          for t in v1.9.5 v1.9.4 v1.9.3 v1.8.0; do
-            name=$(grep -E '^whisper-bin-x64\.zip$' "a-$t.txt" | head -1)
+          for t in v1.9.5 v1.9.4 v1.8.4 v1.8.3 v1.8.2 v1.8.1 v1.8.0; do
+            name=$(grep -E '^whisper-bin-x64\.zip$' "a-$t.txt" | head -1 || true)
             if [ -n "$name" ]; then TAGF=$t; break; fi
           done
           echo "TAGF=$TAGF" >> "$GITHUB_ENV"

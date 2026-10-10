@@ -30,9 +30,16 @@ export type RunOptions = {
   /** Only the tail of stderr is kept, for diagnostics. */
   maxStderrBytes?: number
   cwd?: string
+  /** Called with each stderr chunk as it arrives (progress output). */
+  onStderr?: (chunk: string) => void
 }
 
-export type RunResult = { stdout: string; stderr: string }
+export type RunResult = {
+  stdout: string
+  /** The same output as raw bytes, for binary data such as decoded audio. */
+  stdoutBuffer: Buffer
+  stderr: string
+}
 
 /**
  * Runs a program asynchronously without a shell. Arguments are passed as an
@@ -102,7 +109,13 @@ export function runProcess(file: string, args: readonly string[], options: RunOp
       stdoutChunks.push(chunk)
     })
     child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8')
+      const text = chunk.toString('utf8')
+      try {
+        options.onStderr?.(text)
+      } catch {
+        // A progress callback must never break the process handling.
+      }
+      stderr += text
       if (stderr.length > maxStderrBytes) stderr = stderr.slice(-maxStderrBytes)
     })
 
@@ -123,7 +136,15 @@ export function runProcess(file: string, args: readonly string[], options: RunOp
             })
           )
         } else {
-          resolve({ stdout: Buffer.concat(stdoutChunks).toString('utf8'), stderr })
+          const stdoutBuffer = Buffer.concat(stdoutChunks)
+          // The text form is built only if asked for (binary output can be large).
+          resolve({
+            get stdout() {
+              return stdoutBuffer.toString('utf8')
+            },
+            stdoutBuffer,
+            stderr
+          })
         }
       })
     })
