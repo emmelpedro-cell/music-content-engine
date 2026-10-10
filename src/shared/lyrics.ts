@@ -263,8 +263,10 @@ const normalizeToken = (t: string) =>
   t
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^\p{L}\p{N}']/gu, '')
+    // Drop Latin accents (so "dança" matches "danca"), but keep the vowel signs of scripts such
+    // as Devanagari (Nepali, Hindi), which are part of the letters.
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{M}\p{N}']/gu, '')
 
 /**
  * Takes lyrics typed or pasted by the user (correct text, no timing) and

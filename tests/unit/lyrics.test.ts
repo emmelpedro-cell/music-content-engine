@@ -118,6 +118,26 @@ describe('alignToTimings', () => {
     expect(tail[2]).toBeGreaterThan(tail[1]!)
   })
 
+  it('aligns lyrics in scripts with vowel signs (Nepali, Devanagari)', () => {
+    const nepali: LyricDocument = {
+      version: 1,
+      lines: [
+        {
+          id: 'n',
+          kind: 'lyric',
+          words: [
+            { id: '1', text: 'म', start: 1, end: 1.2 },
+            { id: '2', text: 'गीत', start: 1.2, end: 1.6 },
+            { id: '3', text: 'गाउँछु', start: 1.6, end: 2.2 }
+          ]
+        }
+      ]
+    }
+    // Vowel signs (matras) are combining marks; they must survive normalisation.
+    const doc = alignToTimings('म गीत गाउँछु', nepali)
+    expect(doc.lines[0]!.words.map((w) => w.start)).toEqual([1, 1.2, 1.6])
+  })
+
   it('leaves text untimed when there is nothing to align with', () => {
     const doc = alignToTimings('only text', { version: 1, lines: [] })
     expect(doc.lines[0]!.words.every((w) => w.start === null)).toBe(true)
