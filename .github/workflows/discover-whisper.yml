@@ -1,0 +1,62 @@
+# TEMPORARY (Phase 2 setup): finds the exact whisper.cpp release assets, model checksums
+# and the CLI's word-timestamp output on Windows. Removed once the pins are recorded.
+name: discover-whisper
+on:
+  push:
+    branches: [phase-2-analysis]
+    paths: ['.github/workflows/discover-whisper.yml']
+jobs:
+  discover:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v1.9.5
+    steps:
+      - name: Release assets
+        run: |
+          gh release view "$TAG" -R ggml-org/whisper.cpp --json assets --jq '.assets[] | .name + " " + (.size|tostring)' > assets.txt
+          echo "::notice title=whisper assets::$(tr '\n' '|' < assets.txt)"
+      - name: CPU binary
+        run: |
+          curl -sSL -o bin.zip "https://github.com/ggml-org/whisper.cpp/releases/download/$TAG/whisper-bin-x64.zip"
+          echo "::notice title=bin sha::$(sha256sum bin.zip) $(stat -c %s bin.zip)"
+          mkdir w && cd w && unzip -q ../bin.zip && echo "::notice title=bin files::$(find . -type f | sort | tr '\n' '|')"
+      - name: CLI help
+        run: |
+          CLI=$(find w -name whisper-cli.exe | head -1)
+          "$CLI" -h > help.txt 2>&1 || true
+          echo "::notice title=help::$(sed -e 's/%/%25/g' help.txt | awk '{printf "%s%%0A", $0}' | head -c 60000)"
+      - name: Models
+        run: |
+          for m in tiny base small large-v3-turbo-q5_0 large-v3-turbo-q8_0; do
+            curl -sSL -o "ggml-$m.bin" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$m.bin"
+            echo "$(sha256sum ggml-$m.bin) $(stat -c %s ggml-$m.bin)" >> models.txt
+          done
+          echo "::notice title=models::$(tr '\n' '|' < models.txt)"
+      - name: Speech sample (Windows TTS)
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Speech
+          $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+          $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
+          $s.SetOutputToWaveFile("speech.wav", $fmt)
+          $s.Speak("The quick brown fox jumps over the lazy dog. Music Content Engine transcribes the lyrics of every song.")
+          $s.Dispose()
+          Write-Output "::notice title=tts::$((Get-Item speech.wav).Length) bytes"
+      - name: Transcribe (word timestamps)
+        run: |
+          CLI=$(find w -name whisper-cli.exe | head -1)
+          start=$(date +%s)
+          "$CLI" -m ggml-base.bin -f speech.wav -l en -ml 1 -sow -ojf -of out -pp -t 4 > run.txt 2>&1 || echo "exit $?" >> run.txt
+          echo "::notice title=run seconds::$(( $(date +%s) - start ))"
+          echo "::notice title=stderr::$(tail -c 6000 run.txt | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+          echo "::notice title=json::$(head -c 30000 out.json | sed -e 's/%/%25/g' | tr -d '\r' | awk '{printf "%s%%0A", $0}')"
+      - name: Transcribe with DTW
+        run: |
+          CLI=$(find w -name whisper-cli.exe | head -1)
+          "$CLI" -m ggml-base.bin -f speech.wav -l en -ojf -of dtw --dtw base -t 4 > dtw.txt 2>&1 || echo "exit $?" >> dtw.txt
+          echo "::notice title=dtw stderr::$(tail -c 3000 dtw.txt | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+          echo "::notice title=dtw json::$(head -c 30000 dtw.json | sed -e 's/%/%25/g' | tr -d '\r' | awk '{printf "%s%%0A", $0}')"
