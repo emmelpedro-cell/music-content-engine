@@ -1724,3 +1724,13 @@ textarea:focus {
   border-left: 2px solid var(--line-strong);
   padding-left: 10px;
 }
+
+.transcribe-box.transcribe-folded {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}

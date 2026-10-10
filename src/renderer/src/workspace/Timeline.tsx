@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BeatMap, Waveform } from '../../../shared/analysis'
 import type { Hook } from '../../../shared/hooks'
 import type { LyricDocument } from '../../../shared/lyrics'
@@ -72,6 +72,13 @@ export function Timeline(p: Props) {
     setWidth(el.clientWidth)
     return () => ro.disconnect()
   }, [])
+
+  // When the content gets narrower (zooming out, Fit) the browser clamps scrollLeft without
+  // always firing a scroll event; read it back so the drawing never uses a stale offset.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el && el.scrollLeft !== scroll) setScroll(el.scrollLeft)
+  }, [total]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the playhead in view while playing.
   useEffect(() => {
@@ -234,25 +241,41 @@ export function Timeline(p: Props) {
           g.fillText(l.label || 'Instrumental', x + 4, LYRICS_TOP + 15)
           continue
         }
-        for (const w of l.words) {
-          if (w.start == null) continue
-          const s = w.start + p.lyricsOffset
-          const e = (w.end ?? w.start + 0.3) + p.lyricsOffset
-          if (e < t0 || s > t1) continue
+        // Word blocks; when the words are too narrow for their text (fast singing, rap,
+        // zoomed out), the whole line is written underneath instead.
+        const timedWords = l.words.filter((w) => w.start != null)
+        if (!timedWords.length) continue
+        const lineStart = timedWords[0]!.start! + p.lyricsOffset
+        const last = timedWords[timedWords.length - 1]!
+        const lineEnd = (last.end ?? last.start! + 0.3) + p.lyricsOffset
+        if (lineEnd < t0 || lineStart > t1) continue
+        const widthOf = (w: (typeof timedWords)[number]) => Math.max(2, ((w.end ?? w.start! + 0.3) - w.start!) * pps - 1)
+        const wordsFit = timedWords.every((w) => g.measureText(w.text).width + 6 <= widthOf(w))
+        const blockH = wordsFit ? LYRICS_H : 16
+        for (const w of timedWords) {
+          const s = w.start! + p.lyricsOffset
           const x = X(s)
-          const wpx = Math.max(2, (e - s) * pps - 1)
+          const wpx = widthOf(w)
           const selected = w.id === p.selectedWordId
           g.fillStyle = selected ? accent : w.edited ? 'rgba(236,235,231,0.24)' : 'rgba(236,235,231,0.14)'
-          g.fillRect(x, LYRICS_TOP, wpx, LYRICS_H)
-          if (wpx > 14) {
+          g.fillRect(x, LYRICS_TOP, wpx, blockH)
+          if (wordsFit) {
             g.fillStyle = selected ? '#141414' : text
-            g.save()
-            g.beginPath()
-            g.rect(x, LYRICS_TOP, wpx, LYRICS_H)
-            g.clip()
             g.fillText(w.text, x + 3, LYRICS_TOP + 16)
-            g.restore()
           }
+        }
+        if (!wordsFit) {
+          const idx = p.lyrics.lines.indexOf(l)
+          const nextLine = p.lyrics.lines.slice(idx + 1).find((n) => n.kind === 'lyric' && n.words.some((w) => w.start != null))
+          const nextStart = nextLine ? nextLine.words.find((w) => w.start != null)!.start! + p.lyricsOffset : lineEnd + 2
+          const x = X(lineStart)
+          g.save()
+          g.beginPath()
+          g.rect(x, LYRICS_TOP + blockH, Math.max(0, X(nextStart) - x - 4), LYRICS_H - blockH)
+          g.clip()
+          g.fillStyle = l.words.some((w) => w.id === p.selectedWordId) ? accent : text
+          g.fillText(l.words.map((w) => w.text).join(' '), x + 2, LYRICS_TOP + blockH + 16)
+          g.restore()
         }
       }
     }
@@ -341,7 +364,11 @@ export function Timeline(p: Props) {
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => zoomBy(0.66)} aria-label="Zoom out">
           −
         </button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setZoom(null)}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+            setZoom(null)
+            if (scrollRef.current) scrollRef.current.scrollLeft = 0
+            setScroll(0)
+          }}>
           Fit
         </button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => zoomBy(1.5)} aria-label="Zoom in">

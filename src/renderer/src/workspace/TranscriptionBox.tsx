@@ -31,6 +31,8 @@ export function TranscriptionBox({ songId, lyrics, speech, models, onRecheck, on
   const [language, setLanguage] = useState<string | null>(saved.language)
   const t = lyrics.transcription
   const busy = t.status === 'pending' || t.status === 'processing'
+  // Once there are lyrics, the box folds away so the lyrics get the space.
+  const [open, setOpen] = useState(lyrics.status === 'empty')
 
   useEffect(() => {
     if (!installed.some((m) => m.id === model) && installed[0]) setModel((installed.find((m) => m.recommended) ?? installed[0]).id)
@@ -65,6 +67,17 @@ export function TranscriptionBox({ songId, lyrics, speech, models, onRecheck, on
             Check again
           </button>
         )}
+      </div>
+    )
+  }
+
+  if (!open && !busy && t.status !== 'error') {
+    return (
+      <div className="transcribe-box transcribe-folded" data-testid="transcribe-box">
+        <span className="muted small">Automatic transcription with Whisper, on this computer.</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(true)} data-testid="transcribe-open">
+          Transcribe again…
+        </button>
       </div>
     )
   }
