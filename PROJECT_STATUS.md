@@ -39,11 +39,13 @@ Acceptance criterion: _the user can verify lyrics and inspect beat markers again
   - a spoken WAV is transcribed with the base model: the words (including "fox") appear, all timed, and the lyrics stay a **draft**
 - **Packaged app (`dist/win-unpacked`): 4 passed.** `resources/whisper` contains exactly `bin/{whisper-cli.exe, whisper.dll, ggml.dll, ggml-base.dll, ggml-cpu.dll}`, the two license files, NOTICE.txt and manifest.json (no demo tools, no SDL2, no models). The installed app finds and verifies whisper.cpp from `resources/whisper` and analyses a song in its worker (120 BPM found).
 
+**Real song check (2026-10-10):** "Indian Fall 2" (Luneta, 2:58, FL Studio export) analysed with the app's code: 109.0 BPM, 79 bars, tempo confidence 89 %, no warnings, 1.8 s for the whole song. All 38 loudest hits in the track (one every two bars) fall on detected beats and on bar lines. The artist listened to the song mixed with a click on every detected beat and confirmed the tempo is right.
+
 Not yet checked by hand: the installer on a real PC, and transcription of real sung music (only speech is tested automatically).
 
 ## Known issues / limitations
 
-- **Beat analysis accuracy is measured on synthetic music** with known beats (several tempos, human timing, tempo ramps, 3/4 time, no-beat material). Real recordings, especially rubato, free-time intros or songs with tempo changes, may still get a wrong grid or a beat on the off-beat; that's what the corrections are for. Meter is assumed to be 4/4 unless the user changes beats per bar.
+- **Beat analysis accuracy is measured mostly on synthetic music** with known beats, plus one real song so far (several tempos, human timing, tempo ramps, 3/4 time, no-beat material). Real recordings, especially rubato, free-time intros or songs with tempo changes, may still get a wrong grid or a beat on the off-beat; that's what the corrections are for. Meter is assumed to be 4/4 unless the user changes beats per bar.
 - **Song sections** (verse/chorus) and **automatic hook suggestions** are not built; hooks are chosen by hand (the spec marks sections as optional for this phase).
 - **Transcription of singing is approximate**, especially with backing music; vocals are not separated from the mix. Word timings come from Whisper's segment timestamps and can be off by a few hundred milliseconds; DTW token timing didn't work with this build (TD-023).
 - Transcription is only available on Windows x64 (the bundled build). It needs the Microsoft Visual C++ runtime, which is not bundled.
